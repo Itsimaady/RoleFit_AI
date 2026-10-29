@@ -214,6 +214,34 @@ THE 12 QUESTIONS:
 """.strip()
 
 
+LIVE_SETUP_TIMEOUT = 20
+
+
+def _redact(text: str) -> str:
+    """Remove the API key and any URL query strings before logging or returning text."""
+    key = os.getenv("GEMINI_API_KEY", "").strip()
+    if key:
+        text = text.replace(key, "***")
+        text = text.replace(quote(key), "***")
+    text = re.sub(r"([?&]key=)[^&\s\"']+", r"\1***", text)
+    return re.sub(r"(wss?|https?)://[^\s\"']+", "<gemini-endpoint>", text)
+
+
+def _close_details(exc: Exception) -> Tuple[Any, str]:
+    """Close code and reason from a websockets ConnectionClosed error (safe to log)."""
+    frame = getattr(exc, "rcvd", None) or getattr(exc, "sent", None)
+    code = getattr(frame, "code", None) or getattr(exc, "code", None) or "unknown"
+    reason = _redact(str(getattr(frame, "reason", "") or getattr(exc, "reason", "") or ""))[:300]
+    return code, reason
+
+
+async def _send_live_error(websocket: WebSocket, message: str) -> None:
+    try:
+        await websocket.send_json({"type": "error", "message": message})
+    except Exception:
+        pass
+
+
 @app.websocket("/ws/monk-live")
 async def monk_live(websocket: WebSocket):
     """Server-side browser <-> Gemini Live bridge.
@@ -266,8 +294,12 @@ async def monk_live(websocket: WebSocket):
         setup = {
             "setup": {
                 "model": f"models/{GEMINI_LIVE_MODEL}",
-                "responseModalities": ["AUDIO"],
-                "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": GEMINI_VOICE}}},
+                # Per BidiGenerateContentSetup, response modalities and speech
+                # settings belong inside generationConfig, not at the setup level.
+                "generationConfig": {
+                    "responseModalities": ["AUDIO"],
+                    "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": GEMINI_VOICE}}},
+                },
                 "systemInstruction": {"parts": [{"text": _live_system_prompt(resume_text, job_description, questions)}]},
                 "inputAudioTranscription": {},
                 "outputAudioTranscription": {},
@@ -285,16 +317,32 @@ async def monk_live(websocket: WebSocket):
         await gemini_ws.send(json.dumps(setup))
 
         # The Live API sends setupComplete before client content is accepted.
-        # Waiting for it avoids racing the first interview turn.
-        setup_raw = await gemini_ws.recv()
+        # Waiting for it avoids racing the first interview turn. If Gemini
+        # rejects the setup it closes the socket instead (e.g. code 1007).
+        try:
+            setup_raw = await asyncio.wait_for(gemini_ws.recv(), timeout=LIVE_SETUP_TIMEOUT)
+        except websockets.exceptions.ConnectionClosed as exc:
+            code, reason = _close_details(exc)
+            logger.error("Gemini Live closed the connection during setup: %s code=%s reason=%s", type(exc).__name__, code, reason)
+            await _send_live_error(websocket, f"Gemini Live rejected the interview setup (code {code}). {reason}".strip())
+            return
+        except asyncio.TimeoutError:
+            logger.error("Gemini Live did not answer the setup message within %ss", LIVE_SETUP_TIMEOUT)
+            await _send_live_error(websocket, "Gemini Live did not respond to the interview setup in time. Please try again.")
+            return
         if isinstance(setup_raw, bytes):
             setup_raw = setup_raw.decode("utf-8", "replace")
-        setup_msg = json.loads(setup_raw)
+        try:
+            setup_msg = json.loads(setup_raw)
+        except json.JSONDecodeError:
+            setup_msg = {}
         if setup_msg.get("error"):
-            err = setup_msg.get("error") or {}
-            raise RuntimeError(err.get("message", "Gemini Live setup failed"))
+            message = _redact(str((setup_msg.get("error") or {}).get("message", "unknown error")))[:300]
+            logger.error("Gemini Live setup returned an error: %s", message)
+            await _send_live_error(websocket, f"Gemini Live rejected the interview setup: {message}")
+            return
         if "setupComplete" not in setup_msg:
-            logger.warning("Gemini Live setup response did not contain setupComplete: %s", setup_msg)
+            logger.warning("Gemini Live setup response did not contain setupComplete (keys: %s)", sorted(setup_msg.keys())[:10])
 
         # The first model turn is explicitly instructed to ask Question 1.
         await gemini_ws.send(json.dumps({
@@ -380,7 +428,9 @@ async def monk_live(websocket: WebSocket):
     except WebSocketDisconnect:
         pass
     except Exception as exc:
-        logger.exception("Mock Interview Gemini Live bridge failed")
+        # Log type + redacted message only: connection errors can embed the
+        # upstream URL, which carries the API key as a query parameter.
+        logger.error("Mock Interview Gemini Live bridge failed: %s: %s", type(exc).__name__, _redact(str(exc))[:500])
         try:
             # Do not echo exception text: connection errors can include the upstream URL.
             await websocket.send_json({"type": "error", "message": f"Gemini Live connection failed ({type(exc).__name__}). Check the AI service log and the GEMINI_LIVE_MODEL setting."})
