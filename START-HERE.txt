@@ -1,0 +1,34 @@
+ROLEFIT-AI — LOCAL START
+
+1) Backend terminal
+cd backend
+.\.venv\Scripts\python.exe run.py
+
+Backend: http://localhost:8000/docs
+Health:  http://localhost:8000/api/health
+
+2) Frontend terminal
+cd frontend
+npm install
+npm run dev -- --port 5173
+
+Frontend: http://localhost:5173/RoleFit-AI/
+
+LOCAL API FIX
+Development uses relative /api requests. Vite proxies /api to http://localhost:8000.
+This prevents the browser from using the production Render URL during local development.
+
+PRODUCTION
+frontend/.env.production keeps the Render API URL for production builds.
+
+INTERVIEW
+The mock interview keeps 12 questions. Final scoring:
+- Answer / Technical Quality: 40%
+- Communication: 25%
+- Facial Expression: 15%
+- Body Language: 10%
+- Response Delivery / Confidence: 10%
+
+
+FAST START / LAZY EMBEDDING
+The backend no longer loads all-MiniLM-L6-v2 during startup. It starts immediately. The embedding model is loaded only when /api/analyze first needs semantic similarity, then remains cached. Monk Live and DOCX endpoints do not wait for the embedding model.

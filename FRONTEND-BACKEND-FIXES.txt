@@ -1,0 +1,14 @@
+RoleFit-AI — Final stabilization build
+
+Changes in this build:
+- Fixed InterviewScreen streamRef scope crash that caused the white screen.
+- Preserved existing Analyzer, Resume Builder and Mock Interview buttons/actions.
+- Kept the 12-question Monk flow.
+- Kept Gemini Live WebSocket architecture in the frontend/backend.
+- Kept local camera/presentation analysis.
+- Kept exact evaluator-returned final score cards (no repeated default score substitution).
+- Backend source passes Python syntax compilation.
+
+Important:
+- Do NOT copy a real Gemini API key into this archive. Keep it in backend/.env locally.
+- Frontend dependencies were not fully installed in this build environment because npm install exceeded the available execution time; therefore this archive is not falsely marked as a completed npm-build validation.

@@ -1,0 +1,17 @@
+RoleFit-AI FINAL fixes
+
+1. DOCX template downloads:
+   - Added POST /api/resume/generate.
+   - Uses backend/app/generate_helpers.py for all templates.
+   - Returns a real editable DOCX with correct MIME type and download filename.
+
+2. Monk Live:
+   - Gemini Live remains the actual realtime bidirectional voice session.
+   - Browser speechSynthesis is not used.
+   - Microphone PCM is streamed to Gemini Live at 16 kHz.
+   - Gemini native audio is streamed back at 24 kHz.
+   - Input and output transcription are displayed live.
+   - Candidate answers are evaluated after each completed turn.
+   - 12 personalized questions remain intact.
+   - Camera presentation analysis remains local in the browser.
+   - Final scoring uses the requested 40/25/15/10/10 weighting.

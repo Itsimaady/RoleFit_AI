@@ -1,0 +1,15 @@
+MONK LIVE FINAL
+
+Monk uses Gemini Live native audio. Browser speechSynthesis is not used.
+
+Flow:
+1. Enter Monk Live activates the browser AudioContext from the user gesture.
+2. Backend opens a persistent Gemini Live session.
+3. Gemini speaks Question 1 through streamed 24 kHz PCM audio.
+4. Browser microphone is downsampled to 16 kHz mono PCM and streamed continuously.
+5. Gemini Live automatic VAD detects the end of the answer and returns input transcription + native audio response.
+6. The backend sends the transcript to the frontend; the frontend evaluates each answer and advances through exactly 12 supplied questions.
+7. Final evaluation returns the report.
+
+Default Live model: gemini-3.8-live
+The backend keeps the Gemini API key server-side in backend/.env.

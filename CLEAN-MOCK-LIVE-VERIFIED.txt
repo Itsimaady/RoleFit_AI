@@ -1,0 +1,13 @@
+FINAL VERIFICATION NOTES
+- Mock Interview uses Gemini Live WebSocket.
+- 12 personalized questions are requested and progressed in one Live session.
+- Candidate microphone is streamed as 16 kHz PCM.
+- Gemini native audio is returned at 24 kHz.
+- Live input/output transcripts are handled.
+- VAD/interruption handling is enabled.
+- Camera/presentation signals are local browser measurements.
+- Final scoring weights: technical 40, communication 25, facial 15, body language 10, response delivery 10.
+- AudioWorklet is used for microphone capture.
+- No ScriptProcessorNode, SpeechRecognition, speechSynthesis, OpenAI, or XAI runtime path in Mock Interview.
+- MediaPipe dependency is explicitly 1.0.1.
+- Analyzer and Resume Builder routes/components were retained from the source build.
