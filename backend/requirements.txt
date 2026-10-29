@@ -1,12 +1,10 @@
-fastapi==0.115.6
-uvicorn[standard]==0.34.0
-python-multipart==0.0.20
-PyMuPDF==1.25.3
-python-docx==1.1.2
-pydantic==2.10.6
-python-dotenv==1.0.1
-numpy==2.2.2
-scikit-learn==1.6.1
-sentence-transformers==3.4.1
-
+# Core AI service dependencies. Floors are the originally tested versions;
+# ranges allow wheels for newer Python releases (e.g. 3.13/3.14).
+fastapi>=0.115.6,<1
+uvicorn[standard]>=0.34.0,<1
+python-multipart>=0.0.20,<1
+PyMuPDF>=1.25.3,<2
+python-docx>=1.1.2,<2
+pydantic>=2.10.6,<3
+python-dotenv>=1.0.1,<2
 websockets>=15,<19

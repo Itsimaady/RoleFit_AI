@@ -7,6 +7,7 @@ The public API routes are kept compatible with the existing RoleFit-AI frontend.
 
 from __future__ import annotations
 
+import hmac
 import io
 import json
 import logging
@@ -23,7 +24,6 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-import fitz
 from dotenv import load_dotenv
 from app.generate_helpers import build_docx
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
@@ -138,6 +138,32 @@ app.add_middleware(
 )
 
 
+# ---------------------------------------------------------------------------
+# Internal service authentication
+# ---------------------------------------------------------------------------
+# In the MERN architecture this service is internal: only the Express API calls
+# it. When AI_SERVICE_TOKEN is set, every /api/* route (except health) and the
+# live WebSocket require the X-Internal-Token header, so the browser cannot
+# bypass Express authentication and ownership checks.
+
+INTERNAL_TOKEN = os.getenv("AI_SERVICE_TOKEN", "").strip()
+PUBLIC_PATHS = {"/", "/api/health", "/api/health/ready", "/docs", "/redoc", "/openapi.json"}
+
+
+def internal_token_ok(provided: Optional[str]) -> bool:
+    if not INTERNAL_TOKEN:
+        return True
+    return bool(provided) and hmac.compare_digest(provided, INTERNAL_TOKEN)
+
+
+@app.middleware("http")
+async def require_internal_token(request: Request, call_next):
+    if request.url.path not in PUBLIC_PATHS and request.method != "OPTIONS":
+        if not internal_token_ok(request.headers.get("x-internal-token")):
+            return JSONResponse(status_code=401, content={"detail": "Missing or invalid internal service token"})
+    return await call_next(request)
+
+
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
     logger.exception("Unhandled error on %s %s", request.method, request.url.path)
@@ -197,6 +223,9 @@ async def monk_live(websocket: WebSocket):
     audio plus input/output transcriptions. Gemini's automatic VAD handles
     natural turn-taking and interruption.
     """
+    if not internal_token_ok(websocket.headers.get("x-internal-token")):
+        await websocket.close(code=1008)
+        return
     await websocket.accept()
     key = os.getenv("GEMINI_API_KEY", "").strip()
     if not key:
@@ -344,7 +373,8 @@ async def monk_live(websocket: WebSocket):
     except Exception as exc:
         logger.exception("Mock Interview Gemini Live bridge failed")
         try:
-            await websocket.send_json({"type": "error", "message": f"Gemini Live connection failed: {type(exc).__name__}: {exc}"})
+            # Do not echo exception text: connection errors can include the upstream URL.
+            await websocket.send_json({"type": "error", "message": f"Gemini Live connection failed ({type(exc).__name__}). Check the AI service log and the GEMINI_LIVE_MODEL setting."})
         except Exception:
             pass
     finally:
@@ -783,6 +813,11 @@ async def parse_resume_endpoint(file: UploadFile = File(...)):
     extension = Path(name).suffix.lower()
     try:
         if extension == ".pdf":
+            try:
+                import fitz  # PyMuPDF; imported lazily so the service runs even if it cannot load
+            except Exception as exc:
+                logger.warning("PyMuPDF unavailable: %s", exc)
+                raise HTTPException(status_code=503, detail="PDF import is unavailable on this server (PyMuPDF could not be loaded). Upload DOCX or TXT instead.") from exc
             with fitz.open(stream=data, filetype="pdf") as document:
                 text = "\n".join(page.get_text() for page in document)
         elif extension == ".docx":
@@ -948,12 +983,13 @@ def interview_start(req: InterviewStartRequest):
         parsed = extract_json_object(raw)
         if isinstance(parsed, list):
             questions = [item for item in parsed if isinstance(item, dict) and item.get("question")]
-    if len(questions or []) != 12:
+    # ai_used is true only when Gemini actually supplied the full question set.
+    ai_used = len(questions or []) == 12
+    if not ai_used:
+        if raw and not error:
+            error = "Gemini returned an incomplete question set; template questions were used"
         questions = fallback_questions(req.resume_text, req.job_description)
-    questions = (questions or fallback_questions(req.resume_text, req.job_description))[:12]
-    if len(questions) < 12:
-        fallback = fallback_questions(req.resume_text, req.job_description)
-        questions = (questions + fallback)[:12]
+    questions = questions[:12]
     first = questions[0]
     return {
         "question": first["question"],
@@ -964,26 +1000,60 @@ def interview_start(req: InterviewStartRequest):
         "index": 0,
         "questions": questions,
         "rounds": ["Introduction", "Resume Deep Dive", "Technical", "Behavioral/System Design", "Closing"],
-        "ai_used": bool(raw and questions),
-        "fallback_reason": None if raw else error,
+        "ai_used": ai_used,
+        "fallback_reason": None if ai_used else error,
     }
+
+
+# Browser vision metric key -> report label. Values are only used when the
+# browser actually measured them; missing signals are never treated as 0.
+PRESENTATION_KEYS = {
+    "communication": "Communication",
+    "facial": "Facial_Engagement",
+    "eyeContact": "Eye_Contact",
+    "posture": "Body_Language",
+    "bodyMovement": "Delivery",
+}
+
+
+def _metric(value: Any) -> Optional[int]:
+    if isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if number != number:  # NaN
+        return None
+    return max(0, min(100, round(number)))
+
+
+def _measured_presentation(vision: Dict[str, Any]) -> Dict[str, int]:
+    out = {}
+    for key, label in PRESENTATION_KEYS.items():
+        value = _metric((vision or {}).get(key))
+        if value is not None:
+            out[label] = value
+    return out
 
 
 @app.post("/api/interview/evaluate")
 def interview_evaluate(req: InterviewEvaluateRequest):
+    measured = _measured_presentation(req.vision_metrics)
     prompt = (
         "Evaluate this interview answer. Score the answer itself from 0-100 using correctness, relevance, depth, clarity and role alignment. "
-        "Also incorporate the browser-computed presentation signals below, but do not infer personality, intelligence, health, attractiveness or emotion as facts. "
-        "Return JSON with score,feedback,improvement, and presentation object containing Communication, Facial_Engagement, Eye_Contact, Body_Language, Delivery. "
-        "Communication should focus on observable speaking/answer clarity; Facial_Engagement and Body_Language must only reflect measurable presentation signals. "
-        f"\nROUND:{req.round_name}\nQUESTION:{req.question}\nANSWER:{req.answer}\nVISION_METRICS:{json.dumps(req.vision_metrics, ensure_ascii=False)}\n"
+        "Do not infer personality, intelligence, honesty, health, attractiveness or emotion. "
+        "Return JSON with score (integer), feedback (string, 1-3 sentences), improvement (string, 1-2 sentences). "
+        "Base feedback only on the answer text; the answer is a live speech transcript and may contain transcription errors."
+        f"\nROUND:{req.round_name}\nQUESTION:{req.question}\nANSWER:{req.answer}\n"
         f"RESUME:{req.resume_text}\nJOB:{req.job_description}"
     )
     raw, error = call_gemini_text(prompt)
     result = extract_json_object(raw or "")
-    ai_used = isinstance(result, dict)
+    ai_used = isinstance(result, dict) and _metric(result.get("score")) is not None
 
     if not ai_used:
+        # Transparent heuristic fallback (clearly flagged via ai_used=false).
         answer = req.answer.strip()
         question = req.question.lower()
         score = 45 if len(answer) > 40 else 20
@@ -991,93 +1061,143 @@ def interview_evaluate(req: InterviewEvaluateRequest):
         score = min(95, score + technical_terms * 8 + min(20, len(answer) // 120) * 5)
         if any(term in question for term in ["sql", "query"]):
             score = min(95, score + (10 if re.search(r"\bselect\b|\bjoin\b|\bwhere\b", answer, re.I) else 0))
-        vm = req.vision_metrics or {}
         result = {
             "score": score,
-            "feedback": "Your answer was assessed for relevance, specificity and technical evidence, alongside observable presentation signals.",
-            "improvement": "Add a concrete example, explain your reasoning step-by-step, and maintain steady camera attention and professional posture.",
-            "presentation": {
-                "Communication": int(vm.get("communication", 0)),
-                "Facial_Engagement": int(vm.get("facial", 0)),
-                "Eye_Contact": int(vm.get("eyeContact", 0)),
-                "Body_Language": int(vm.get("posture", 0)),
-                "Delivery": int(vm.get("bodyMovement", 0)),
-            }
+            "feedback": "Estimated without AI from answer length and the role-relevant skills you mentioned.",
+            "improvement": "Add a concrete example from your own work and explain your reasoning step by step.",
         }
 
-    result["score"] = max(0, min(100, int(result.get("score", 0))))
-    presentation = result.get("presentation") if isinstance(result.get("presentation"), dict) else {}
-    vm = req.vision_metrics or {}
-    presentation.setdefault("Communication", int(vm.get("communication", 0)))
-    presentation.setdefault("Facial_Engagement", int(vm.get("facial", 0)))
-    presentation.setdefault("Eye_Contact", int(vm.get("eyeContact", 0)))
-    presentation.setdefault("Body_Language", int(vm.get("posture", 0)))
-    presentation.setdefault("Delivery", int(vm.get("bodyMovement", 0)))
-    result["presentation"] = {k:max(0,min(100,int(v or 0))) for k,v in presentation.items()}
-    result["ai_used"] = ai_used
-    result["fallback_reason"] = None if ai_used else error
-    return result
+    return {
+        "score": _metric(result.get("score")) or 0,
+        "feedback": str(result.get("feedback", ""))[:2000],
+        "improvement": str(result.get("improvement", ""))[:2000],
+        # Presentation values are the browser's own measurements, passed through unchanged.
+        "presentation": measured,
+        "ai_used": ai_used,
+        "fallback_reason": None if ai_used else error,
+    }
+
+
+FINAL_WEIGHTS = [
+    # (component, weight %, source)
+    ("answer_technical_quality", 40, "score"),
+    ("communication", 25, "communication"),
+    ("facial_expression", 15, "facial"),
+    ("body_language", 10, "posture"),
+    ("response_delivery", 10, "bodyMovement"),
+]
+
+
+def _weighted_components(history: List[Dict[str, Any]]) -> Tuple[Optional[int], Dict[str, Any], List[str]]:
+    """Deterministic overall score. Components without any measurement are
+    excluded and the remaining weights are re-normalized (reported back)."""
+    components: Dict[str, Any] = {}
+    unavailable: List[str] = []
+    total_weight = 0.0
+    weighted = 0.0
+    for name, weight, source in FINAL_WEIGHTS:
+        if source == "score":
+            values = [_metric(item.get("score")) for item in history if isinstance(item, dict)]
+        else:
+            values = [_metric((item.get("vision") or {}).get(source)) for item in history if isinstance(item, dict)]
+        values = [v for v in values if v is not None]
+        score = round(sum(values) / len(values)) if values else None
+        components[name] = {"weight": weight, "score": score, "samples": len(values)}
+        if score is None:
+            unavailable.append(name)
+        else:
+            total_weight += weight
+            weighted += weight * score
+    overall = round(weighted / total_weight) if total_weight else None
+    return overall, components, unavailable
 
 
 @app.post("/api/interview/final")
 def interview_final(req: InterviewFinalRequest):
-    compact = req.history[:16]
+    compact = [item for item in req.history[:16] if isinstance(item, dict)]
+    overall, components, unavailable = _weighted_components(compact)
+    answers = [{k: item.get(k) for k in ("round", "question", "answer", "score")} for item in compact]
     prompt = (
-        "Review this completed mock interview using ONLY the submitted answers and browser-computed presentation metrics. "
-        "Do not infer personality, intelligence, health, appearance or emotion. The final overall_score MUST use these "
-        "weights: Answer / Technical Quality 40%, Communication 25%, Facial Expression 15%, Body Language 10%, "
-        "Response Delivery / Confidence 10%. Return JSON with: overall_score (0-100), breakdown "
-        "object with exactly these seven integer keys Technical_Knowledge, Resume_Knowledge, Problem_Solving, Communication, Job_Relevance, Facial_Engagement, Body_Language; "
-        "also return presentation object with Eye_Contact and Delivery integer scores; strengths array of 3 strings; improvements array of 3 strings; topics "
-        "array of 3-6 strings; summary string. Base every point on the actual answers.\n"
-        f"RESUME:\n{req.resume_text}\nJOB:\n{req.job_description}\nANSWERS_WITH_PRESENTATION_METRICS:\n{json.dumps(compact, ensure_ascii=False)}"
+        "Review this completed mock interview using ONLY the submitted answers (live speech transcripts). "
+        "Do not infer personality, intelligence, honesty, health, appearance or emotion, and do not compute an overall score. "
+        "Return JSON with: strengths (array of up to 3 strings), improvements (array of up to 3 strings), "
+        "topics (array of 3-6 strings to study next), summary (2-4 sentences). Base every point on the actual answers.\n"
+        f"RESUME:\n{req.resume_text}\nJOB:\n{req.job_description}\n"
+        f"ANSWERS:\n{json.dumps(answers, ensure_ascii=False)}"
     )
     raw, error = call_gemini_text(prompt)
     result = extract_json_object(raw or "")
     ai_used = isinstance(result, dict)
 
     if not ai_used:
-        scores = [int(item.get("score", 0)) for item in compact if isinstance(item, dict)] or [0]
-        answer_avg = round(sum(scores) / len(scores))
-        def vavg(key):
-            vals=[int((item.get("vision") or {}).get(key, 0)) for item in compact if isinstance(item, dict)]
-            return round(sum(vals)/len(vals)) if vals else 0
-        communication = vavg("communication")
-        facial = vavg("facial")
-        eye = vavg("eyeContact")
-        posture = vavg("posture")
-        delivery = vavg("bodyMovement")
-        # Final interview score uses the requested transparent weighting:
-        # Answer / Technical Quality 40% + Communication 25% + Facial Expression 15%
-        # + Body Language 10% + Response Delivery / Confidence 10%.
-        def avg_items(items):
-            vals=[int(x.get("score",0)) for x in items if isinstance(x,dict)]
-            return round(sum(vals)/len(vals)) if vals else answer_avg
-        resume_items=[x for x in compact if str(x.get("round","")).lower() in {"resume deep dive","resume"}]
-        problem_items=[x for x in compact if any(t in str(x.get("round","")).lower() for t in ["technical","system design","problem"])]
-        technical=avg_items(problem_items)
-        resume_knowledge=avg_items(resume_items)
-        job_relevance=round(sum(int(x.get("score",0)) * (1.0 if any(str(k).lower() in str(x.get("answer","")).lower() for k in skills(req.job_description)) else .85) for x in compact)/len(compact)) if compact else answer_avg
-        average = round(answer_avg*.40 + communication*.25 + facial*.15 + posture*.10 + delivery*.10)
         result = {
-            "overall_score": average,
-            "breakdown": {"Technical_Knowledge": technical, "Resume_Knowledge": resume_knowledge, "Problem_Solving": avg_items(problem_items), "Communication": communication, "Job_Relevance": max(0,min(100,job_relevance)), "Facial_Engagement": facial, "Body_Language": posture},
-            "presentation": {"Eye_Contact": eye, "Delivery": delivery},
-            "strengths": [item.get("feedback", "Relevant answer evidence") for item in compact if item.get("score", 0) >= 75][:3] or ["You completed the interview with answer-based evidence."],
-            "improvements": [item.get("improvement", "Add more concrete evidence.") for item in compact if item.get("score", 0) < 75][:3] or ["Add more concrete examples and explain your reasoning step-by-step."],
-            "topics": ["Technical fundamentals", "Resume projects", "Role-specific problem solving"],
-            "summary": "Overall score calculated from answer quality and observable presentation signals using the requested weighting.",
+            "strengths": [item.get("feedback") for item in compact if (_metric(item.get("score")) or 0) >= 75 and item.get("feedback")][:3],
+            "improvements": [item.get("improvement") for item in compact if (_metric(item.get("score")) or 0) < 75 and item.get("improvement")][:3],
+            "topics": [],
+            "summary": "AI review was unavailable, so this summary lists the per-answer feedback recorded during the interview.",
         }
 
-    # Always compute the headline score from the requested transparent weights.
-    scored = [int(item.get("score",0)) for item in compact if isinstance(item,dict)] or [0]
-    answer_quality = round(sum(scored)/len(scored))
-    def pavg(k):
-        vals=[int((item.get("vision") or {}).get(k,0)) for item in compact if isinstance(item,dict)]
-        return round(sum(vals)/len(vals)) if vals else 0
-    weighted_overall = round(answer_quality*.40 + pavg("communication")*.25 + pavg("facial")*.15 + pavg("posture")*.10 + pavg("bodyMovement")*.10)
-    result["overall_score"] = max(0, min(100, weighted_overall))
-    result["weighting"] = {"answer_technical_quality":40,"communication":25,"facial_expression":15,"body_language":10,"response_delivery":10}
-    result["ai_used"] = ai_used
-    result["fallback_reason"] = None if ai_used else error
-    return result
+    def strings(value: Any, limit: int) -> List[str]:
+        return [str(x)[:500] for x in (value if isinstance(value, list) else []) if str(x).strip()][:limit]
+
+    return {
+        "overall_score": overall,
+        "components": components,
+        "unavailable_components": unavailable,
+        "weighting": {name: weight for name, weight, _ in FINAL_WEIGHTS},
+        "weighting_note": (
+            "Components with no measurements are excluded and the remaining weights are re-normalized."
+            if unavailable
+            else "All weighted components were measured."
+        ),
+        "strengths": strings(result.get("strengths"), 3),
+        "improvements": strings(result.get("improvements"), 3),
+        "topics": strings(result.get("topics"), 6),
+        "summary": str(result.get("summary", ""))[:2000],
+        "ai_used": ai_used,
+        "fallback_reason": None if ai_used else error,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Resume bullet rewrite (suggestion only)
+# ---------------------------------------------------------------------------
+
+
+class RewriteRequest(StrictModel):
+    text: str = Field(..., min_length=5, max_length=400)
+    context: str = Field(default="", max_length=200)
+    job_description: str = Field(default="", max_length=20000)
+
+
+@app.post("/api/ai/rewrite-bullet")
+def rewrite_bullet(req: RewriteRequest):
+    if not gemini_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="AI rewriting needs GEMINI_API_KEY in backend/.env. Your resume and rule-based analysis keep working without it.",
+        )
+    prompt = (
+        "Rewrite ONE resume bullet point to be clearer and more impactful for a student or early-career candidate. "
+        "STRICT RULES: keep every fact exactly as given; never add numbers, metrics, percentages, tools, technologies, "
+        "responsibilities, outcomes or awards that are not in the original; do not change the meaning. "
+        "Start with a strong past-tense action verb, keep it under 35 words, no first person. "
+        "If the original lacks impact details, do not invent them; instead use notes to say what real detail the candidate could add. "
+        "Return JSON with keys suggestion (string) and notes (string).\n"
+        f"ENTRY CONTEXT: {req.context}\nTARGET JOB (for wording only, never for adding facts): {req.job_description[:4000]}\n"
+        f"ORIGINAL BULLET: {req.text}"
+    )
+    raw, error = call_gemini_text(prompt)
+    result = extract_json_object(raw or "")
+    suggestion = str(result.get("suggestion", "")).strip() if isinstance(result, dict) else ""
+    if not suggestion:
+        logger.warning("Bullet rewrite failed: %s", error)
+        raise HTTPException(status_code=502, detail="The AI did not return a usable suggestion. Please try again.")
+    # Safety net: discard suggestions that introduce numbers absent from the original.
+    new_numbers = set(re.findall(r"\d+(?:\.\d+)?", suggestion)) - set(re.findall(r"\d+(?:\.\d+)?", req.text))
+    if new_numbers:
+        raise HTTPException(
+            status_code=422,
+            detail="The AI suggestion introduced numbers that are not in your original bullet, so it was discarded. Try again or edit manually.",
+        )
+    return {"suggestion": suggestion[:400], "notes": str(result.get("notes", ""))[:400]}

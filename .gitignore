@@ -6,3 +6,6 @@ __pycache__/
 frontend/.env
 .DS_Store
 dist/
+.pytest_cache/
+coverage/
+*.log
