@@ -1,7 +1,7 @@
 import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import mongoose from 'mongoose';
-import { setupDatabase, teardownDatabase, clearDatabase, registeredClient, sampleResume, startFakeAiService } from './helpers.js';
+import { setupDatabase, teardownDatabase, clearDatabase, registeredClient, sampleResume, startFakeAiService, useUnreachableAiService } from './helpers.js';
 import { Resume } from '../src/models/Resume.js';
 
 let app;
@@ -201,12 +201,15 @@ describe('resume export', () => {
   });
 
   it('returns 503 with guidance when the AI service is down', async () => {
-    const ai = await startFakeAiService();
-    await ai.stop(); // service now unreachable
-    const c = await registeredClient(app);
-    const { body } = await c.post('/api/resumes').send(sampleResume);
-    const res = await c.get(`/api/resumes/${body.resume._id}/export/docx`);
-    assert.equal(res.status, 503);
-    assert.equal(res.body.error.code, 'ai_service_unavailable');
+    const restore = await useUnreachableAiService();
+    try {
+      const c = await registeredClient(app);
+      const { body } = await c.post('/api/resumes').send(sampleResume);
+      const res = await c.get(`/api/resumes/${body.resume._id}/export/docx`);
+      assert.equal(res.status, 503);
+      assert.equal(res.body.error.code, 'ai_service_unavailable');
+    } finally {
+      restore();
+    }
   });
 });

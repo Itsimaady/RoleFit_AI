@@ -41,7 +41,11 @@ jobs:
       - name: Build frontend
         working-directory: frontend
         env:
-          VITE_API_URL: https://rolefit-ai-f126h.onrender.com
+          # GitHub Pages serves the app from /RoleFit-AI/. The API (Express) must be
+          # deployed separately and set as the VITE_API_URL repository variable;
+          # cross-site cookies then require COOKIE_SAMESITE=none and HTTPS on the API.
+          VITE_BASE: /RoleFit-AI/
+          VITE_API_URL: ${{ vars.VITE_API_URL }}
         run: npm run build
 
       - name: Setup Pages

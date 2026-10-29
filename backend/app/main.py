@@ -244,6 +244,10 @@ async def monk_live(websocket: WebSocket):
         resume_text = str(first.get("resume_text", ""))
         job_description = str(first.get("job_description", ""))
         questions = [q for q in first.get("questions", []) if isinstance(q, dict) and q.get("question")][:12]
+        try:
+            start_index = max(0, min(11, int(first.get("start_index", 0))))
+        except (TypeError, ValueError):
+            start_index = 0
         if not resume_text.strip() or not job_description.strip() or len(questions) != 12:
             await websocket.send_json({"type": "error", "message": "Mock Interview requires the resume, job description, and all 12 interview questions."})
             await websocket.close(code=1008)
@@ -295,7 +299,12 @@ async def monk_live(websocket: WebSocket):
         # The first model turn is explicitly instructed to ask Question 1.
         await gemini_ws.send(json.dumps({
             "clientContent": {
-                "turns": [{"role": "user", "parts": [{"text": "Begin the interview now. Greet the candidate in one short sentence and ask Question 1 exactly as supplied."}]}],
+                "turns": [{"role": "user", "parts": [{"text": (
+                    "Begin the interview now. Greet the candidate in one short sentence and ask Question 1 exactly as supplied."
+                    if start_index == 0
+                    else f"The connection was interrupted and has been restored. Questions 1 to {start_index} are already answered. "
+                    f"Say in one short sentence that you are resuming, then ask Question {start_index + 1} exactly as supplied."
+                )}]}],
                 "turnComplete": True,
             }
         }))

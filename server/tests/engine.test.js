@@ -23,6 +23,12 @@ describe('skill detection', () => {
     assert.deepEqual(labels('Take the rest of the day off and express your ideas'), []);
   });
 
+  it('recognises bare "Express" only in a technical context', () => {
+    assert.ok(labels('Built REST APIs with Express and MongoDB').includes('Express.js'));
+    assert.ok(labels('Node.js, Express, React').includes('Express.js'));
+    assert.ok(!labels('Able to express ideas clearly').includes('Express.js'));
+  });
+
   it('recognises aliases', () => {
     assert.ok(labels('RESTful APIs on Amazon Web Services with k8s').includes('REST APIs'));
     assert.ok(labels('RESTful APIs on Amazon Web Services with k8s').includes('AWS'));

@@ -38,7 +38,13 @@ const entries = [
   ['Accessibility', 'frontend', ['accessibility', 'a11y', 'wcag']],
   // Backend
   ['Node.js', 'backend', ['node(?:\\.?js)?']],
-  ['Express.js', 'backend', ['express(?:\\.?js| js)', 'express framework']],
+  // Bare "Express" only counts next to stack terms, so the verb "express" is ignored.
+  ['Express.js', 'backend', [
+    'express(?:\\.?js| js)',
+    'express framework',
+    'express(?=[\\s,/+&]+(?:and |with )?(?:mongo|node|react|rest|api|backend|server|mern))',
+    '(?<=(?:node(?:\\.?js)?|mongo(?:db)?|react(?:\\.?js)?)[\\s,/+&]+(?:and )?)express',
+  ]],
   ['FastAPI', 'backend', ['fastapi']],
   ['Django', 'backend', ['django']],
   ['Flask', 'backend', ['flask']],

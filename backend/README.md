@@ -1,41 +1,26 @@
-# RoleFit-AI local backend
+# RoleFit AI — internal AI service (FastAPI)
 
-FastAPI backend for resume analysis, ATS matching, optimization, DOCX generation and the Monk interview.
+Optional Python service used **only by the Express API** (`../server`). It is not meant to be exposed to browsers.
 
-## AI stack
-- **Gemini Live API** powers the real-time Monk speech-to-speech WebSocket session.
-- **Gemini text API** powers personalized interview questions, answer evaluation, optimization and final scoring.
-- **Sentence Transformers** provides local semantic embeddings.
-- Camera/presentation signals remain browser-local.
+## Responsibilities
+- **Gemini Live bridge** — `/ws/monk-live`: browser 16 kHz PCM (relayed by Express) ⇄ Gemini Live native audio, live transcription, VAD/interruption. Supports `start_index` to resume after a dropped connection.
+- **Gemini text** — `/api/interview/start` (12 personalised questions), `/api/interview/evaluate`, `/api/interview/final` (deterministic weighted score + AI summary), `/api/ai/rewrite-bullet` (no new facts; suggestions adding numbers are rejected).
+- **Documents** — `/api/resume/parse` (PDF/DOCX/TXT/MD), `/api/resume/generate` (7 DOCX layouts in `app/generate_helpers.py`).
+- Legacy `/api/analyze` and `/api/optimize` remain available but the UI now uses the Express rule-based analyzer.
 
-## Environment
-Create/edit `backend/.env` from `.env.example`:
+Every response that may come from a fallback includes `ai_used` and `fallback_reason`.
 
-```env
-GEMINI_API_KEY=
-GEMINI_LIVE_MODEL=gemini-2.5-flash-native-audio-preview-12-2025
-GEMINI_TEXT_MODEL=gemini-2.5-flash
-GEMINI_VOICE=Aoede
-EMBEDDING_MODEL=all-MiniLM-L6-v2
-MAX_UPLOAD_MB=10
-MAX_TEXT_CHARS=50000
-AI_TIMEOUT_SECONDS=45
-LOG_LEVEL=INFO
-CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
-```
-
-Never expose the API key in the React frontend.
+## Security
+- Set `AI_SERVICE_TOKEN` (same value as `server/.env`). Then all `/api/*` routes except health, and the WebSocket, require `X-Internal-Token`.
+- `run.py` binds to `127.0.0.1` by default. Keep it that way unless the service runs on a private network.
+- The Gemini key lives only in `backend/.env`.
 
 ## Run
-```cmd
-py -3.12 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe run.py
+```bash
+python -m venv .venv
+.venv\Scripts\python -m pip install -r requirements.txt       # core
+.venv\Scripts\python -m pip install -r requirements-dev.txt   # + pytest
+.venv\Scripts\python run.py                                   # http://127.0.0.1:8000/docs
+.venv\Scripts\python -m pytest -q
 ```
-
-Health endpoints:
-- `/api/health`
-- `/api/health/ready`
-- `/docs`
-
-The Monk live WebSocket is `/ws/monk-live`. The frontend automatically sends it to the backend URL from `VITE_API_URL`.
+`requirements-embeddings.txt` adds the optional sentence-transformers model for the legacy `/api/analyze` endpoint (Python 3.12 recommended for its pinned versions). PyMuPDF is imported lazily, so the service starts even if it cannot load; PDF parsing then returns a clear 503.

@@ -5,7 +5,7 @@ import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { WebSocket } from 'ws';
-import { setupDatabase, teardownDatabase, clearDatabase, registeredClient, sampleResume, sampleJD, startFakeAiService, ORIGIN } from './helpers.js';
+import { setupDatabase, teardownDatabase, clearDatabase, registeredClient, sampleResume, sampleJD, startFakeAiService, useUnreachableAiService, ORIGIN } from './helpers.js';
 import { InterviewSession } from '../src/models/InterviewSession.js';
 import { attachLiveRelay, LIVE_PATH } from '../src/services/liveRelay.js';
 
@@ -26,17 +26,20 @@ const create = (c, resumeId) => c.post('/api/interviews').send({ resumeId, targe
 
 describe('interview configuration and errors', () => {
   it('reports availability honestly when the AI service is offline', async () => {
-    const ai = await startFakeAiService();
-    await ai.stop();
-    const { c, resumeId } = await setup();
-    const avail = await c.get('/api/interviews/availability');
-    assert.equal(avail.status, 200);
-    assert.equal(avail.body.ready, false);
-    assert.equal(avail.body.aiServiceReachable, false);
+    const restore = await useUnreachableAiService();
+    try {
+      const { c, resumeId } = await setup();
+      const avail = await c.get('/api/interviews/availability');
+      assert.equal(avail.status, 200);
+      assert.equal(avail.body.ready, false);
+      assert.equal(avail.body.aiServiceReachable, false);
 
-    const res = await create(c, resumeId);
-    assert.equal(res.status, 503);
-    assert.equal(await InterviewSession.countDocuments(), 0, 'no fake session is created');
+      const res = await create(c, resumeId);
+      assert.equal(res.status, 503);
+      assert.equal(await InterviewSession.countDocuments(), 0, 'no fake session is created');
+    } finally {
+      restore();
+    }
   });
 
   it('refuses to start when Gemini is not configured', async () => {

@@ -128,6 +128,19 @@ export async function startFakeAiService({ geminiConfigured = true } = {}) {
   };
 }
 
+/** Points the API at a port with nothing listening, regardless of what runs locally. */
+export async function useUnreachableAiService() {
+  const probe = http.createServer();
+  await new Promise((r) => probe.listen(0, '127.0.0.1', r));
+  const { port } = probe.address();
+  await new Promise((r) => probe.close(r));
+  const previous = config.aiService.url;
+  config.aiService.url = `http://127.0.0.1:${port}`;
+  return () => {
+    config.aiService.url = previous;
+  };
+}
+
 function safeJson(s) {
   try {
     return JSON.parse(s);
