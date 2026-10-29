@@ -76,7 +76,7 @@ Preferred
 - Experience with Redis or Kafka.`;
 
 /** Minimal stand-in for the Python AI service, recording what Express sends it. */
-export async function startFakeAiService({ geminiConfigured = true } = {}) {
+export async function startFakeAiService({ geminiConfigured = true, ...options } = {}) {
   const calls = [];
   const server = http.createServer((req, res) => {
     let body = '';
@@ -99,6 +99,22 @@ export async function startFakeAiService({ geminiConfigured = true } = {}) {
         return res.end(Buffer.from('PK\u0003\u0004fake-docx'));
       }
       if (req.url === '/api/ai/rewrite-bullet') return json(200, { suggestion: 'Built REST APIs in FastAPI.', notes: '' });
+      // ---- guided interview stand-ins
+      const b = calls.at(-1).body || {};
+      if (req.url === '/api/interview/guided/questions') {
+        return json(200, { questions: Array.from({ length: b.count }, (_, i) => ({ question: `${b.category} question ${i + 1}?`, category: b.category, topic: 't', difficulty: b.difficulty })) });
+      }
+      if (req.url === '/api/interview/guided/evaluate') {
+        if (options.failEvaluate) return json(502, { detail: 'The AI could not produce a valid answer evaluation. Please try again.' });
+        // Deterministic score derived from the transcript so tests can check averages.
+        const score = Number((b.transcript.match(/score=(\d+)/) || [])[1] ?? 7);
+        return json(200, { score, strengths: ['Clear'], missing_concepts: ['Edge cases'], inaccuracies: [], clarity: 'Good.', improvements: ['Add an example'], example_answer: 'A strong answer would…', revise: ['Big-O'], follow_up: 'Why?' });
+      }
+      if (req.url === '/api/interview/guided/learn') {
+        if (options.failLearn) return json(502, { detail: 'The AI could not produce a valid learning answer. Please try again.' });
+        return json(200, { why_it_matters: 'It matters.', concepts: ['Hashing'], example_answer: 'Suggested answer: …', simple_explanation: 'Simply put…', practical_example: 'For example…', key_points: ['Point'], follow_up_question: 'Next?' });
+      }
+      if (req.url === '/api/interview/guided/summary') return json(200, { strengths: ['Clear explanations'], improvements: ['Depth'], recommendations: ['Revise hashing'], ai_used: true });
       return json(404, { detail: 'not found' });
     });
   });

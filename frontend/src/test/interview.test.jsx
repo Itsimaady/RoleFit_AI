@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { screen } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import { routes } from '../App.jsx';
 import { mockApi, renderRoutes, testUser } from './utils.jsx';
 import { createChunker, deliveryHeuristic, downsample, pcmBase64 } from '../features/interview/audio.js';
@@ -35,13 +35,19 @@ describe('InterviewsPage', () => {
       'GET /api/interviews': () => [200, empty],
     });
     renderRoutes(routes, '/app/interviews');
-    expect(await screen.findByText(/live interviews are not available/i)).toBeInTheDocument();
+    expect(await screen.findByText(/AI interviews are not available/i)).toBeInTheDocument();
     expect(screen.getByText(/Gemini is not configured/)).toBeInTheDocument();
+    // Guided mode (default): configuration is visible but cannot start.
+    expect(await screen.findByRole('button', { name: /start interview/i })).toBeDisabled();
+    expect(screen.getByText(/analysed only in this browser/)).toBeInTheDocument();
+    // Live mode keeps its own setup.
+    const user = (await import('@testing-library/user-event')).default.setup();
+    await user.click(screen.getByRole('tab', { name: /live conversation/i }));
     expect(await screen.findByRole('button', { name: /prepare interview/i })).toBeDisabled();
     expect(screen.getByText(/Video never leaves your browser/)).toBeInTheDocument();
   });
 
-  it('asks for a resume first when the user has none', async () => {
+  it('guided mode works without a resume; live mode asks for one', async () => {
     mockApi({
       ...authed,
       'GET /api/interviews/availability': () => [200, { ready: true }],
@@ -49,6 +55,12 @@ describe('InterviewsPage', () => {
       'GET /api/interviews': () => [200, empty],
     });
     renderRoutes(routes, '/app/interviews');
+    // Guided mode works without a resume (general questions)…
+    expect(await screen.findByRole('option', { name: /none — general questions/i })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('button', { name: /start interview/i })).toBeEnabled());
+    // …while the live mode still needs one.
+    const user = (await import('@testing-library/user-event')).default.setup();
+    await user.click(screen.getByRole('tab', { name: /live conversation/i }));
     expect(await screen.findByText('You need a resume first')).toBeInTheDocument();
   });
 });

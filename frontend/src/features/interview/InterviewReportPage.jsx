@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Info, MessageSquare, Trash2 } from 'lucide-react';
 import { api } from '../../lib/api.js';
 import { STATUS_LABEL, formatDateTime } from '../../lib/format.js';
 import { useApiData } from '../../hooks/useApiData.js';
 import { useToast } from '../../context/ToastContext.jsx';
 import { Alert, Badge, Button, ConfirmDialog, ErrorState, Meter, PageLoader, Ring } from '../../components/ui.jsx';
+import { GuidedReport } from './GuidedReport.jsx';
 
 const COMPONENT_LABEL = {
   answer_technical_quality: 'Answer / technical quality',
@@ -19,7 +20,7 @@ export function InterviewReportPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const toast = useToast();
-  const { data, error, loading, reload } = useApiData(`/api/interviews/${id}`);
+  const { data, error, loading, reload, setData } = useApiData(`/api/interviews/${id}`);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
@@ -46,6 +47,31 @@ export function InterviewReportPage() {
     );
 
   const s = data.session;
+  if (s.mode === 'guided') {
+    if (s.status === 'ready' || s.status === 'in_progress') return <Navigate to={`/app/interviews/${id}/guided`} replace />;
+    return (
+      <div className="page page-wide">
+        <div className="row" style={{ justifyContent: 'space-between' }}>
+          <Link to="/app/interviews" className="back-link">
+            <ArrowLeft size={14} /> Mock interviews
+          </Link>
+          <Button size="sm" onClick={() => setConfirmDelete(true)}>
+            <Trash2 size={14} /> Delete
+          </Button>
+        </div>
+        {s.status === 'abandoned' ? (
+          <Alert tone="info" title="This interview was ended before any question was answered">
+            There is nothing to report. <Link to="/app/interviews">Start a new interview</Link>.
+          </Alert>
+        ) : (
+          <GuidedReport session={s} onUpdated={(session) => setData({ session })} />
+        )}
+        <ConfirmDialog open={confirmDelete} title="Delete this interview?" confirmLabel="Delete" tone="danger" loading={deleting} onConfirm={remove} onCancel={() => setConfirmDelete(false)}>
+          <p>The transcripts, scores and learning answers will be permanently deleted.</p>
+        </ConfirmDialog>
+      </div>
+    );
+  }
   const r = s.report;
   const components = r?.components ? Object.entries(r.components) : [];
   const anyFallback = s.answers.some((a) => !a.aiUsed) || (r && !r.ai_used);

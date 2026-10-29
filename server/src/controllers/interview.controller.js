@@ -3,6 +3,7 @@ import { Resume } from '../models/Resume.js';
 import { ApiError } from '../utils/errors.js';
 import { aiClient } from '../services/aiClient.js';
 import { resumeToText } from '../services/resumeText.js';
+import { completeGuidedInterview } from './guidedInterview.controller.js';
 
 const ACTIVE = ['ready', 'in_progress'];
 
@@ -71,6 +72,7 @@ export async function createInterview(req, res) {
 export async function submitAnswer(req, res) {
   const { index, answer, vision } = req.body;
   const session = await findOwned(req, { withResumeText: true });
+  if (session.mode === 'guided') throw ApiError.badRequest('Guided interviews record answers through /responses.');
   if (!ACTIVE.includes(session.status)) throw ApiError.conflict(`This interview is ${session.status.replace('_', ' ')} and no longer accepts answers.`);
   if (index !== session.answers.length) throw new ApiError(409, 'out_of_order', `Expected an answer for question ${session.answers.length + 1}.`);
   const question = session.questions[index];
@@ -114,6 +116,7 @@ export async function submitAnswer(req, res) {
 
 export async function completeInterview(req, res) {
   const session = await findOwned(req, { withResumeText: true });
+  if (session.mode === 'guided') return completeGuidedInterview(req, res);
   if (session.status === 'completed') return res.json({ session: { ...session.toObject(), resumeText: undefined } });
   if (!ACTIVE.includes(session.status)) throw ApiError.conflict('This interview was ended and cannot be completed.');
   if (!session.answers.length) {
@@ -153,7 +156,7 @@ export async function listInterviews(req, res) {
   const filter = { owner: req.user.id };
   const [items, total] = await Promise.all([
     InterviewSession.find(filter)
-      .select('targetRole resumeTitle status questionSource report.overall_score answers.index startedAt completedAt createdAt')
+      .select('mode targetRole resumeTitle status questionSource config.category config.difficulty config.questionCount report.overall_score report.averageScore answers.index responses.index startedAt completedAt createdAt')
       .sort({ createdAt: -1 })
       .skip((page - 1) * limit)
       .limit(limit)
@@ -161,7 +164,7 @@ export async function listInterviews(req, res) {
     InterviewSession.countDocuments(filter),
   ]);
   res.json({
-    items: items.map(({ answers, ...rest }) => ({ ...rest, answeredCount: answers?.length || 0 })),
+    items: items.map(({ answers, responses, ...rest }) => ({ ...rest, answeredCount: rest.mode === 'guided' ? responses?.length || 0 : answers?.length || 0 })),
     page,
     limit,
     total,

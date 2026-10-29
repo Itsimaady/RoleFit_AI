@@ -42,7 +42,8 @@ async function request(path, { method = 'POST', json, body, contentType, timeout
     }
     if (response.status === 503) throw ApiError.unavailable(detail || UNAVAILABLE, 'ai_not_configured');
     if (response.status >= 400 && response.status < 500) throw new ApiError(response.status === 413 ? 413 : 400, 'ai_request_rejected', detail || 'The AI service rejected the request.');
-    throw new ApiError(502, 'ai_service_error', 'The AI service failed to complete the request. Please try again.');
+    // The AI service's own messages are written to be safe for users; prefer them.
+    throw new ApiError(502, 'ai_service_error', detail || 'The AI service failed to complete the request. Please try again.');
   }
   return response;
 }

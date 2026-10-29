@@ -176,6 +176,7 @@ export function InterviewLivePage() {
         </div>
       </div>
     );
+  if (session.mode === 'guided') return <Navigate to={`/app/interviews/${id}/guided`} replace />;
   if (session.status === 'completed') return <Navigate to={`/app/interviews/${id}`} replace />;
   if (session.status === 'abandoned')
     return (

@@ -213,21 +213,22 @@ export function Meter({ value, tone = '', label }) {
 }
 
 /** Circular progress for a real 0-100 value; renders "—" when the value is unknown. */
-export function Ring({ value, size = 88, stroke = 8, label, sublabel, tone = 'accent' }) {
+/** display overrides the centre text (e.g. 5.7 for a 0–10 score drawn on a 0–100 arc). */
+export function Ring({ value, size = 88, stroke = 8, label, sublabel, tone = 'accent', display }) {
   const r = (size - stroke) / 2;
   const c = 2 * Math.PI * r;
   const known = value !== null && value !== undefined && Number.isFinite(Number(value));
   const v = known ? Math.max(0, Math.min(100, Number(value))) : 0;
   const color = { accent: 'var(--accent)', success: 'var(--success)', warning: 'var(--warning)', ai: 'var(--ai)' }[tone];
   return (
-    <div className="ring" style={{ width: size, height: size }} role="img" aria-label={known ? `${label}: ${Math.round(v)}%` : `${label}: not measurable`}>
+    <div className="ring" style={{ width: size, height: size }} role="img" aria-label={known ? `${label}: ${display ?? `${Math.round(v)}%`}` : `${label}: not measurable`}>
       <svg width={size} height={size} aria-hidden="true">
         <circle className="track" cx={size / 2} cy={size / 2} r={r} fill="none" strokeWidth={stroke} />
         {known && <circle className="value" cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color} strokeWidth={stroke} strokeLinecap="round" strokeDasharray={c} strokeDashoffset={c * (1 - v / 100)} />}
       </svg>
       <div className="ring-label" aria-hidden="true">
         <div>
-          <strong className="tabular">{known ? Math.round(v) : '—'}</strong>
+          <strong className="tabular">{known ? (display ?? Math.round(v)) : '—'}</strong>
           {known && <small>{sublabel ?? '%'}</small>}
         </div>
       </div>

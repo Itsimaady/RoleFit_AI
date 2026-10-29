@@ -148,7 +148,7 @@ export function attachLiveRelay(server) {
 
       const id = url.searchParams.get('sessionId') || '';
       if (!/^[a-f0-9]{24}$/i.test(id)) return reject(socket, 400, 'Bad Request');
-      const interview = await InterviewSession.findOne({ _id: id, owner: session.user, status: { $in: ['ready', 'in_progress'] } })
+      const interview = await InterviewSession.findOne({ _id: id, owner: session.user, mode: { $ne: 'guided' }, status: { $in: ['ready', 'in_progress'] } })
         .select('+resumeText questions targetRole jobDescription status answers.index')
         .lean();
       if (!interview) return reject(socket, 404, 'Not Found');

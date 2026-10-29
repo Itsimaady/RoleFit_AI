@@ -48,6 +48,7 @@ RoleFit AI helps you prepare. It does **not** guarantee interviews, ATS selectio
 | AI bullet rewrite (suggestion only) | Python + Gemini text via Express | Yes + Gemini key |
 | Interview questions, per-answer evaluation, final review | Python + Gemini text via Express | Yes + Gemini key* |
 | Live voice interview | Browser ⇄ Express relay ⇄ Python bridge ⇄ Gemini Live | Yes + Gemini key |
+| **Guided voice interview** — spoken questions (browser TTS), live transcription (browser `SpeechRecognition`), per-answer evaluation, learning answers, PDF report | Browser + Express + Python/Gemini text | Yes + Gemini key |
 | Camera presentation signals | Browser only (MediaPipe) | No (frames never leave the browser) |
 
 \* Without a working Gemini response the Python service falls back to template questions and rule-based estimates; every record stores `ai_used`/`aiUsed` and the UI labels these as *estimated*.
@@ -225,6 +226,12 @@ All bodies are JSON. Errors are `{ "error": { "code", "message", "details?" } }`
 | POST | `/api/interviews/:id/answers` | `{index, answer, vision}`; strictly sequential, evaluated by the AI service |
 | POST | `/api/interviews/:id/complete` | Generate and store the report (needs ≥ 1 answer) |
 | POST | `/api/interviews/:id/abandon` | End early |
+| POST | `/api/interviews` with `mode: "guided"` | `{difficulty, category, questionCount (5/10/15/20), resumeId?, jobDescription?, targetRole?, company?, language?, durationMinutes?, visualCoaching}` → exactly `questionCount` questions *(AI service + Gemini)* |
+| POST | `/api/interviews/:id/responses` | Guided: `{index, status: answered \| skipped_for_learning \| answered_but_empty \| technical_error, transcript, inputMethod, recognition, visual?}`; answered ones are evaluated (0–10) |
+| POST | `/api/interviews/:id/responses/:index/evaluate` | Retry a failed evaluation |
+| POST | `/api/interviews/:id/learning` | Generate missing learning answers for skipped questions and refresh the report |
+| POST | `/api/interviews/:id/practice` | `{kind: "skipped" \| "weak"}` → new guided session reusing those questions |
+| GET | `/api/interviews/:id/report.pdf` | Guided interview learning report (409 until learning answers exist) |
 | POST | `/api/ai/rewrite-bullet` | `{text, context?, jobDescription?}` → suggestion only *(AI service + Gemini)* |
 | GET | `/api/dashboard` | Counts, recent items, activity and completed-interview scores |
 | WS | `/ws/interview-live?sessionId=` | Authenticated live relay (`audio`, `advance`, `repeat`, `finish`, `close`) |
@@ -263,9 +270,9 @@ No audio, video frames, tokens or API keys are stored.
 ## Testing
 
 ```bash
-npm --prefix server test       # 65 tests: real mongod via mongodb-memory-server, stubbed AI service
-npm --prefix frontend test     # 30 tests: Vitest + Testing Library (fetch mocked)
-cd backend && .venv\Scripts\python -m pytest -q    # 22 tests (needs requirements-dev.txt)
+npm --prefix server test       # 81 tests: real mongod via mongodb-memory-server, stubbed AI service
+npm --prefix frontend test     # 59 tests: Vitest + Testing Library (fetch mocked)
+cd backend && .venv\Scripts\python -m pytest -q    # 44 tests (needs requirements-dev.txt)
 npm run lint                   # syntax check (server) + import/export check (frontend)
 npm run build                  # production build
 ```
@@ -288,8 +295,25 @@ Automated tests never touch your real database; each test file starts its own th
 | Interview lifecycle (create, ordered answers, complete, abandon, ownership) and WebSocket relay auth/context | **Automated tests pass** against a *stubbed* AI service |
 | AI service token boundary, fallbacks, weighted scoring, DOCX, TXT parsing | **pytest pass** (no Gemini key) |
 | **Real Gemini text responses, real Gemini Live voice session, MediaPipe camera analysis in a browser** | **Not verified** — no Gemini key, microphone/camera or interactive browser was available during this work |
+| Guided interview: configuration, question count, statuses, averages, learning answers, practice sessions, PDF | **Automated tests pass** (Express + pytest + Vitest) and a full Chrome walkthrough against the real React/Express/Mongo stack with a **stand-in** AI service and **scripted** speech APIs |
+| Guided interview with real Gemini output, real microphone transcription and real TTS voices | **Not verified** on this machine (no Gemini key; headless Chrome has no usable microphone or voices) |
 | PDF *import* (PyMuPDF) | **Not verified on this machine** (Windows Application Control blocked the DLL); code path unchanged from the original apart from a lazy import |
 | Visual layout in real browsers at mobile/tablet/desktop widths | **Not visually verified** (responsive CSS written; navigation behaviour covered by tests) |
+
+## Guided voice interview
+
+The default **Mock interviews** mode. Configure difficulty (Easy/Medium/Hard), 5/10/15/20 questions, one of 12 categories (or Mixed), optional resume / job description / role / company / language / duration, and voice settings (spoken questions, voice, rate, transcription language, microphone test, optional camera coaching).
+
+During the interview each question is shown and read aloud; listening starts only after it finishes. Your words appear live (interim text in grey). Pauses do not end the answer — nothing is submitted until you click **Stop answer** and then **Submit answer** (you can edit the transcript, resume listening, retry, replay the question, pause, or **Skip question — learn this later**). Every response is saved server-side, so refreshing or leaving resumes at the next question.
+
+How the pieces work and their honest limits:
+
+- **Transcription** uses the browser's Web Speech API. In Chrome and Edge, audio is processed by the browser vendor's speech service (Google / Microsoft); RoleFit stores only the final transcript. Firefox has no `SpeechRecognition`, so answers are typed there. Recognition sessions that end on their own are resumed automatically (bounded retries, no duplicated text, nothing dropped), and the 8-minute safety limit stops recording without discarding text.
+- **Spoken questions** use `speechSynthesis`. A watchdog prevents the interview from hanging if an engine never reports the end of speech.
+- **Scoring**: Gemini scores each answered question 0–10 with category-specific criteria and returns strengths, missing concepts, inaccuracies, clarity, improvements, a stronger example answer, topics and a follow-up. The average includes **only evaluated answers** — skips, empty answers, technical problems and pending evaluations are never counted as zero. There are no heuristic fallback scores: if Gemini fails the answer is kept and can be re-evaluated.
+- **Skipped questions** get a full learning entry (why it matters, concepts, suggested answer, simpler explanation, practical example, key points, practice question) in “Questions I need to learn” and in the PDF. The PDF is generated only once every learning answer exists.
+- **Camera coaching** (off by default) runs MediaPipe face landmarks in the browser and reports only whether the face is in frame and roughly facing the camera. If no face is detected the cue is reported as unavailable. Frames are never uploaded or stored; tracks stop when the interview ends or the page closes.
+- **PDF report** is rendered server-side with PDFKit and an embedded DejaVu Sans font (handles ₹, curly quotes, dashes, accents); unsupported scripts are replaced rather than drawn as broken glyphs.
 
 ## Known limitations
 

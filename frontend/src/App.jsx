@@ -15,6 +15,7 @@ import { AnalysisDetailPage } from './features/analysis/AnalysisDetailPage.jsx';
 import { InterviewsPage } from './features/interview/InterviewsPage.jsx';
 import { InterviewLivePage } from './features/interview/InterviewLivePage.jsx';
 import { InterviewReportPage } from './features/interview/InterviewReportPage.jsx';
+import { GuidedInterviewPage } from './features/interview/GuidedInterviewPage.jsx';
 
 export const routes = [
   { path: '/', element: <LandingPage /> },
@@ -40,6 +41,7 @@ export const routes = [
           { path: 'interviews', element: <InterviewsPage /> },
           { path: 'interviews/:id', element: <InterviewReportPage /> },
           { path: 'interviews/:id/live', element: <InterviewLivePage /> },
+          { path: 'interviews/:id/guided', element: <GuidedInterviewPage /> },
           { path: 'profile', element: <ProfilePage /> },
           { path: '*', element: <NotFoundPage inApp /> },
         ],

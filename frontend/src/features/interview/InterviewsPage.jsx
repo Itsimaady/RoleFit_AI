@@ -7,6 +7,8 @@ import { useApiData } from '../../hooks/useApiData.js';
 import { useToast } from '../../context/ToastContext.jsx';
 import { Alert, Badge, Button, ConfirmDialog, EmptyState, ErrorState, PageHeader, SkeletonList } from '../../components/ui.jsx';
 import { JobForm, validateJobForm } from '../analysis/AnalysisPage.jsx';
+import { GuidedSetup } from './GuidedSetup.jsx';
+import { interviewPath, scoreLabel } from './guidedModel.js';
 
 export function InterviewsPage() {
   const [params] = useSearchParams();
@@ -22,6 +24,7 @@ export function InterviewsPage() {
   const [creating, setCreating] = useState(false);
   const [toDelete, setToDelete] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  const [mode, setMode] = useState('guided');
 
   // Prefill from a job analysis ("Practise an interview for this job").
   useEffect(() => {
@@ -66,12 +69,25 @@ export function InterviewsPage() {
 
   return (
     <div className="page">
-      <PageHeader title="Mock interviews" description="A live voice interview with 12 questions generated from your resume and the job description." />
+      <PageHeader
+        title="Mock interviews"
+        description="Practise out loud with questions tailored to your target role, then review feedback and learn what you skipped."
+        actions={
+          <div className="segmented" role="tablist" aria-label="Interview mode">
+            <button type="button" role="tab" aria-selected={mode === 'guided'} onClick={() => setMode('guided')}>
+              Guided voice interview
+            </button>
+            <button type="button" role="tab" aria-selected={mode === 'live'} onClick={() => setMode('live')}>
+              Live conversation
+            </button>
+          </div>
+        }
+      />
 
       {availability.data && !ready && (
         <Alert
           tone="warning"
-          title="Live interviews are not available right now"
+          title="AI interviews are not available right now"
           action={
             <Button size="sm" onClick={availability.reload}>
               Check again
@@ -83,7 +99,19 @@ export function InterviewsPage() {
       )}
       {availability.error && <Alert tone="warning" title="Could not check interview availability">{availability.error.message}</Alert>}
 
+      {mode === 'guided' && (
+        <GuidedSetup
+          resumes={resumeItems}
+          availability={availability.data}
+          initial={{ resumeId: values.resumeId, jobDescription: values.jobDescription, targetRole: values.targetRole }}
+        />
+      )}
+
+      {mode === 'live' && (
       <div className="grid-2" style={{ alignItems: 'start' }}>
+        <p className="small muted" style={{ gridColumn: '1 / -1' }}>
+          Live conversation uses Gemini Live speech-to-speech: the AI hears you directly and moves on when you pause. It always asks 12 questions and needs a resume and job description.
+        </p>
         <form className="card" onSubmit={create} noValidate aria-labelledby="setup-title" style={{ gridColumn: 'span 1' }}>
           <div className="card-header">
             <h2 id="setup-title">
@@ -152,6 +180,7 @@ export function InterviewsPage() {
           </div>
         </section>
       </div>
+      )}
 
       <section className="card" aria-labelledby="interview-history">
         <div className="card-header">
@@ -166,24 +195,27 @@ export function InterviewsPage() {
           <ul className="list">
             {history.data.items.map((s) => {
               const resumable = s.status === 'ready' || s.status === 'in_progress';
+              const title = s.targetRole || s.config?.category || 'Mock interview';
+              const total = s.mode === 'guided' ? s.config?.questionCount : 12;
+              const score = scoreLabel(s);
               return (
-                <li className="list-row" key={s._id}>
+                <li className="list-row interactive" key={s._id}>
                   <div className="grow">
-                    <Link className="title" to={resumable ? `/app/interviews/${s._id}/live` : `/app/interviews/${s._id}`}>
-                      {s.targetRole}
+                    <Link className="title" to={interviewPath(s)}>
+                      {title}
                     </Link>
                     <span className="meta">
-                      {s.resumeTitle} · {formatDate(s.createdAt)} · {s.answeredCount}/12 answered
+                      {s.mode === 'guided' ? `Guided · ${s.config?.category} · ${s.config?.difficulty}` : 'Live conversation'} · {formatDate(s.createdAt)} · {s.answeredCount}/{total} done
                       {s.questionSource === 'fallback' && ' · template questions'}
                     </span>
                   </div>
-                  {s.status === 'completed' && s.report?.overall_score != null ? <Badge tone="tone-success">{s.report.overall_score}/100</Badge> : <Badge tone={STATUS_TONE[s.status]}>{STATUS_LABEL[s.status]}</Badge>}
+                  {score ? <Badge tone="tone-success">{score}</Badge> : <Badge tone={STATUS_TONE[s.status]}>{STATUS_LABEL[s.status]}</Badge>}
                   {resumable && (
-                    <Link className="btn btn-sm" to={`/app/interviews/${s._id}/live`}>
+                    <Link className="btn btn-sm" to={interviewPath(s)}>
                       {s.status === 'ready' ? 'Start' : 'Continue'}
                     </Link>
                   )}
-                  <Button size="sm" variant="ghost" className="btn-icon" onClick={() => setToDelete(s)} aria-label={`Delete interview for ${s.targetRole}`}>
+                  <Button size="sm" variant="ghost" className="btn-icon" onClick={() => setToDelete(s)} aria-label={`Delete interview for ${title}`}>
                     <Trash2 size={15} />
                   </Button>
                 </li>
@@ -198,7 +230,7 @@ export function InterviewsPage() {
       </section>
 
       <ConfirmDialog open={Boolean(toDelete)} title="Delete this interview?" confirmLabel="Delete" tone="danger" loading={deleting} onConfirm={remove} onCancel={() => setToDelete(null)}>
-        <p>The transcript and feedback for “{toDelete?.targetRole}” will be permanently deleted.</p>
+        <p>The transcript and feedback for “{toDelete?.targetRole || toDelete?.config?.category}” will be permanently deleted.</p>
       </ConfirmDialog>
     </div>
   );

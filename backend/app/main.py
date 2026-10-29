@@ -1260,3 +1260,17 @@ def rewrite_bullet(req: RewriteRequest):
             detail="The AI suggestion introduced numbers that are not in your original bullet, so it was discarded. Try again or edit manually.",
         )
     return {"suggestion": suggestion[:400], "notes": str(result.get("notes", ""))[:400]}
+
+
+# ---------------------------------------------------------------------------
+# Guided voice interview (questions / evaluation / learning / summary)
+# ---------------------------------------------------------------------------
+
+from app import guided_interview  # noqa: E402
+
+guided_interview.configure(
+    gemini=lambda prompt: call_gemini_text(prompt),
+    extract=lambda raw: extract_json_object(raw),
+    configured=lambda: gemini_configured(),
+)
+app.include_router(guided_interview.router)

@@ -7,6 +7,7 @@ import './styles/components.css';
 import './styles/layout.css';
 import './styles/resume.css';
 import './styles/features.css';
+import './styles/guided.css';
 
 // Apply the saved theme before first paint to avoid a flash.
 try {

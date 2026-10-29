@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext.jsx';
 import { useApiData } from '../hooks/useApiData.js';
 import { Badge, EmptyState, ErrorState, Meter, Skeleton, SkeletonList } from '../components/ui.jsx';
 import { STATUS_LABEL, STATUS_TONE, formatDate, timeAgo } from '../lib/format.js';
+import { interviewPath, scoreLabel } from '../features/interview/guidedModel.js';
 
 function greeting() {
   const h = new Date().getHours();
@@ -17,9 +18,9 @@ function nextAction(data) {
     return {
       kicker: 'Continue where you left off',
       icon: MessageSquare,
-      title: `${unfinished.targetRole} mock interview`,
-      meta: `${unfinished.answeredCount} of 12 questions answered · started ${timeAgo(unfinished.createdAt)}`,
-      to: `/app/interviews/${unfinished._id}/live`,
+      title: `${unfinished.targetRole || unfinished.config?.category || ''} mock interview`,
+      meta: `${unfinished.answeredCount} of ${unfinished.mode === 'guided' ? unfinished.config?.questionCount : 12} questions done · started ${timeAgo(unfinished.createdAt)}`,
+      to: interviewPath(unfinished),
       cta: unfinished.answeredCount ? 'Resume interview' : 'Start interview',
     };
   }
@@ -78,7 +79,7 @@ function Journey({ counts }) {
   const steps = [
     { icon: FileText, title: 'Build a resume', desc: 'Structured sections, live preview, PDF/DOCX.', done: counts.resumes > 0, doneText: `${counts.resumes} saved`, to: '/app/resumes' },
     { icon: Target, title: 'Match a job', desc: 'Find matched skills and real gaps.', done: counts.analyses > 0, doneText: `${counts.analyses} analysis${counts.analyses === 1 ? '' : 'es'}`, to: '/app/analyses' },
-    { icon: MessageSquare, title: 'Practise an interview', desc: '12 questions with a live AI interviewer.', done: counts.completedInterviews > 0, doneText: `${counts.completedInterviews} completed`, to: '/app/interviews' },
+    { icon: MessageSquare, title: 'Practise an interview', desc: 'Spoken questions, live transcript and feedback.', done: counts.completedInterviews > 0, doneText: `${counts.completedInterviews} completed`, to: '/app/interviews' },
   ];
   const nextIndex = steps.findIndex((s) => !s.done);
   return (
@@ -251,15 +252,15 @@ export function DashboardPage() {
                     {data.recentInterviews.map((i) => (
                       <li className="list-row interactive" key={i._id}>
                         <div className="grow">
-                          <Link className="title" to={`/app/interviews/${i._id}`}>
-                            {i.targetRole}
+                          <Link className="title" to={interviewPath(i)}>
+                            {i.targetRole || i.config?.category}
                           </Link>
                           <span className="meta">
-                            {i.answeredCount}/12 answered · {formatDate(i.createdAt)}
+                            {i.mode === 'guided' ? 'Guided' : 'Live'} · {i.answeredCount}/{i.mode === 'guided' ? i.config?.questionCount : 12} done · {formatDate(i.createdAt)}
                           </span>
                         </div>
-                        {i.status === 'completed' && i.report?.overall_score != null ? (
-                          <Badge tone="tone-success">{i.report.overall_score}/100</Badge>
+                        {scoreLabel(i) ? (
+                          <Badge tone="tone-success">{scoreLabel(i)}</Badge>
                         ) : (
                           <Badge tone={STATUS_TONE[i.status]}>{STATUS_LABEL[i.status]}</Badge>
                         )}
