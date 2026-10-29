@@ -48,10 +48,14 @@ describe('app shell navigation', () => {
   it('renders the dashboard from API data only', async () => {
     mockApi(api);
     renderRoutes(routes, '/app');
-    expect(await screen.findByText('Welcome, Test')).toBeInTheDocument();
-    expect(await screen.findByText('Backend Resume')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /, Test$/ })).toBeInTheDocument();
+    expect((await screen.findAllByText('Backend Resume')).length).toBeGreaterThan(0);
     expect(screen.getByText('71/100')).toBeInTheDocument();
-    expect(screen.queryByText('Getting started')).not.toBeInTheDocument();
+    // Totals and journey states come straight from the API counts.
+    expect(screen.getByLabelText('Your totals')).toHaveTextContent('2Resumes1Job analyses1Interviews completed');
+    expect(screen.getByText('1 completed')).toBeInTheDocument();
+    // "Continue" points at the most recently edited resume.
+    expect(screen.getByText('Continue where you left off')).toBeInTheDocument();
   });
 
   it('shows a retry action when the dashboard fails to load', async () => {

@@ -1,6 +1,29 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useBlocker, useNavigate, useParams } from 'react-router-dom';
-import { AlertTriangle, ArrowLeft, CheckCircle2, Copy, Download, Eye, FileDown, MessageSquare, Pencil, Save, Target } from 'lucide-react';
+import {
+  AlertTriangle,
+  ArrowLeft,
+  ArrowRight,
+  Award,
+  Briefcase,
+  CheckCircle2,
+  Copy,
+  Download,
+  FileDown,
+  FolderGit2,
+  GraduationCap,
+  Link2,
+  MessageSquare,
+  MoreHorizontal,
+  Pencil,
+  Save,
+  ScrollText,
+  Target,
+  Trash2,
+  Trophy,
+  UserRound,
+  Wrench,
+} from 'lucide-react';
 import { api, download, fieldErrors } from '../../lib/api.js';
 import { validateResume } from '../../lib/validation.js';
 import { formatDateTime } from '../../lib/format.js';
@@ -10,12 +33,22 @@ import { DOCX_LAYOUTS, SECTIONS, TEMPLATES, completeness, toEditorState, toPaylo
 import { SECTION_FORMS } from './SectionForms.jsx';
 import { ResumePreview } from './ResumePreview.jsx';
 
-function ExportMenu({ resumeId, title, dirty }) {
-  const [open, setOpen] = useState(false);
-  const [busy, setBusy] = useState(null);
-  const toast = useToast();
-  const ref = useRef(null);
+const SECTION_ICONS = {
+  personal: UserRound,
+  summary: ScrollText,
+  education: GraduationCap,
+  experience: Briefcase,
+  projects: FolderGit2,
+  skills: Wrench,
+  certifications: Award,
+  achievements: Trophy,
+  links: Link2,
+};
 
+/** Small dropdown with outside-click / Escape handling. */
+function Dropdown({ label, icon: Icon, children, buttonProps = {}, width = 240 }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
   useEffect(() => {
     if (!open) return undefined;
     const onDown = (e) => !ref.current?.contains(e.target) && setOpen(false);
@@ -27,10 +60,26 @@ function ExportMenu({ resumeId, title, dirty }) {
       document.removeEventListener('keydown', onKey);
     };
   }, [open]);
+  return (
+    <div className="menu-wrap" ref={ref}>
+      <Button onClick={() => setOpen((v) => !v)} aria-haspopup="menu" aria-expanded={open} {...buttonProps}>
+        {Icon && <Icon size={15} />}
+        {label}
+      </Button>
+      {open && (
+        <div className="menu" role="menu" style={{ minWidth: width }} onClick={() => setOpen(false)}>
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
 
+function ExportMenu({ resumeId, title, dirty }) {
+  const [busy, setBusy] = useState(false);
+  const toast = useToast();
   const run = async (kind, layout) => {
-    setOpen(false);
-    setBusy(kind);
+    setBusy(true);
     try {
       const path = kind === 'pdf' ? `/api/resumes/${resumeId}/export/pdf` : `/api/resumes/${resumeId}/export/docx${layout ? `?layout=${layout}` : ''}`;
       await download(path, `${title || 'Resume'}.${kind}`);
@@ -38,34 +87,25 @@ function ExportMenu({ resumeId, title, dirty }) {
     } catch (err) {
       toast.error(err.message);
     } finally {
-      setBusy(null);
+      setBusy(false);
     }
   };
-
   return (
-    <div className="menu-wrap" ref={ref}>
-      <Button onClick={() => setOpen((v) => !v)} aria-haspopup="menu" aria-expanded={open} loading={Boolean(busy)}>
-        <Download size={16} /> Export
-      </Button>
-      {open && (
-        <div className="menu" role="menu" style={{ minWidth: 250 }}>
-          {dirty && <div className="menu-label" style={{ color: 'var(--warning)', textTransform: 'none', letterSpacing: 0 }}>Exports use the last saved version.</div>}
-          <button type="button" role="menuitem" onClick={() => run('pdf')}>
-            <FileDown size={16} /> PDF (selected template)
-          </button>
-          <hr />
-          <div className="menu-label">Editable Word (DOCX)</div>
-          {DOCX_LAYOUTS.map((l) => (
-            <button type="button" role="menuitem" key={l.id} onClick={() => run('docx', l.id)}>
-              <FileDown size={16} /> {l.name}
-            </button>
-          ))}
-          <div className="menu-label" style={{ textTransform: 'none', letterSpacing: 0, fontWeight: 500 }}>
-            DOCX export needs the AI service to be running.
-          </div>
-        </div>
-      )}
-    </div>
+    <Dropdown label={<span className="btn-label">Export</span>} icon={Download} width={260} buttonProps={{ loading: busy, 'aria-label': 'Export', title: 'Export PDF or DOCX' }}>
+      {dirty && <div className="menu-note" style={{ color: 'var(--warning)' }}>Exports use the last saved version — save first to include recent edits.</div>}
+      <div className="menu-label">PDF</div>
+      <button type="button" role="menuitem" onClick={() => run('pdf')}>
+        <FileDown size={15} /> PDF · current template
+      </button>
+      <hr />
+      <div className="menu-label">Editable Word (DOCX)</div>
+      {DOCX_LAYOUTS.map((l) => (
+        <button type="button" role="menuitem" key={l.id} onClick={() => run('docx', l.id)}>
+          <FileDown size={15} /> {l.name}
+        </button>
+      ))}
+      <div className="menu-note">DOCX export needs the AI service to be running.</div>
+    </Dropdown>
   );
 }
 
@@ -82,8 +122,11 @@ export function ResumeEditorPage() {
   const [conflict, setConflict] = useState(false);
   const [active, setActive] = useState('personal');
   const [view, setView] = useState('edit');
-  const [duplicating, setDuplicating] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const savingRef = useRef(false);
+  const leavingRef = useRef(false);
+  const formTopRef = useRef(null);
 
   const load = useCallback(
     async (signal) => {
@@ -126,7 +169,7 @@ export function ResumeEditorPage() {
     if (!resume || savingRef.current) return false;
     if (Object.keys(clientErrors).length) {
       const first = Object.keys(clientErrors)[0].split('.')[0];
-      setActive(first === 'title' ? active : first);
+      if (first !== 'title') setActive(first);
       toast.error('Please fix the highlighted fields before saving.');
       return false;
     }
@@ -151,7 +194,7 @@ export function ResumeEditorPage() {
     } finally {
       savingRef.current = false;
     }
-  }, [resume, clientErrors, payloadJson, id, meta.revision, toast, active]);
+  }, [resume, clientErrors, payloadJson, id, meta.revision, toast]);
 
   // Ctrl/Cmd + S
   useEffect(() => {
@@ -175,133 +218,180 @@ export function ResumeEditorPage() {
     window.addEventListener('beforeunload', onBeforeUnload);
     return () => window.removeEventListener('beforeunload', onBeforeUnload);
   }, [dirty]);
-  const blocker = useBlocker(({ currentLocation, nextLocation }) => dirty && currentLocation.pathname !== nextLocation.pathname);
+  const blocker = useBlocker(({ currentLocation, nextLocation }) => dirty && !leavingRef.current && currentLocation.pathname !== nextLocation.pathname);
 
   const duplicate = async () => {
-    setDuplicating(true);
     try {
       const { resume: copy } = await api.post(`/api/resumes/${id}/duplicate`);
       toast.success(`Created "${copy.title}" from the last saved version.`);
       navigate(`/app/resumes/${copy._id}`);
     } catch (err) {
       toast.error(err.message);
-    } finally {
-      setDuplicating(false);
     }
+  };
+
+  const remove = async () => {
+    setDeleting(true);
+    try {
+      await api.del(`/api/resumes/${id}`);
+      leavingRef.current = true;
+      toast.success(`Deleted "${resume.title}".`);
+      navigate('/app/resumes', { replace: true });
+    } catch (err) {
+      toast.error(err.message);
+      setDeleting(false);
+    }
+  };
+
+  const goTo = (sectionId) => {
+    setActive(sectionId);
+    formTopRef.current?.scrollIntoView?.({ block: 'start', behavior: 'smooth' });
   };
 
   if (loadState.loading && !resume) return <PageLoader label="Loading resume" />;
   if (loadState.error)
     return (
       <div className="page">
+        <Link to="/app/resumes" className="back-link">
+          <ArrowLeft size={14} /> All resumes
+        </Link>
         <div className="card">
           <ErrorState error={loadState.error} onRetry={() => load()} />
         </div>
-        <Link to="/app/resumes">
-          <ArrowLeft size={14} /> Back to resumes
-        </Link>
       </div>
     );
 
   const Form = SECTION_FORMS[active];
-  const sectionMeta = SECTIONS.find((s) => s.id === active);
+  const index = SECTIONS.findIndex((s) => s.id === active);
+  const sectionMeta = SECTIONS[index];
+  const prev = SECTIONS[index - 1];
+  const next = SECTIONS[index + 1];
   const done = completeness(resume);
+  const SectionIcon = SECTION_ICONS[active];
 
   const status = {
-    saving: { cls: '', icon: <span className="spinner" aria-hidden="true" />, text: 'Saving…' },
-    error: { cls: 'error', icon: <AlertTriangle size={14} />, text: 'Not saved' },
-    saved: { cls: 'saved', icon: <CheckCircle2 size={14} />, text: 'All changes saved' },
-  }[saveState] || (dirty ? { cls: 'dirty', icon: <Pencil size={14} />, text: 'Unsaved changes' } : { cls: '', icon: <CheckCircle2 size={14} />, text: `Saved ${formatDateTime(meta.updatedAt)}` });
+    saving: { cls: 'saving', icon: <span className="spinner" aria-hidden="true" />, text: 'Saving…' },
+    error: { cls: 'error', icon: <AlertTriangle size={13} />, text: 'Not saved' },
+    saved: { cls: 'saved', icon: <CheckCircle2 size={13} />, text: 'All changes saved' },
+  }[saveState] || (dirty ? { cls: 'dirty', icon: <Pencil size={13} />, text: 'Unsaved changes' } : { cls: '', icon: <CheckCircle2 size={13} />, text: `Saved ${formatDateTime(meta.updatedAt)}` });
 
   return (
-    <div className="page page-wide">
-      <div className="stack" style={{ gap: 10 }}>
-        <Link to="/app/resumes" className="small">
-          <ArrowLeft size={14} style={{ verticalAlign: '-2px' }} /> All resumes
+    <div className="page page-wide editor-page">
+      <div className="editor-toolbar card">
+        <Link to="/app/resumes" className="btn btn-ghost btn-icon btn-sm toolbar-back" aria-label="Back to all resumes" title="All resumes">
+          <ArrowLeft size={16} />
         </Link>
-        <div className="editor-toolbar">
+        <div className="title-wrap">
           <label htmlFor="resume-title" className="sr-only">
             Resume title
           </label>
-          <input
-            id="resume-title"
-            className="title-input"
-            value={resume.title}
-            maxLength={100}
-            aria-invalid={errors.title ? true : undefined}
-            onChange={(e) => setResume((r) => ({ ...r, title: e.target.value }))}
-          />
+          <input id="resume-title" className="title-input" value={resume.title} maxLength={100} aria-invalid={errors.title ? true : undefined} onChange={(e) => setResume((r) => ({ ...r, title: e.target.value }))} />
           <span className={`save-state ${status.cls}`} role="status" aria-live="polite">
             {status.icon} {status.text}
           </span>
-          <span className="spacer" />
-          <Button className="preview-toggle" onClick={() => setView((v) => (v === 'edit' ? 'preview' : 'edit'))} aria-pressed={view === 'preview'}>
-            {view === 'edit' ? <Eye size={16} /> : <Pencil size={16} />} {view === 'edit' ? 'Preview' : 'Edit'}
-          </Button>
-          <Button onClick={duplicate} loading={duplicating} title="Duplicate the saved version">
-            <Copy size={16} /> Duplicate
-          </Button>
-          <ExportMenu resumeId={id} title={resume.title} dirty={dirty} />
-          <Button variant="primary" onClick={save} loading={saveState === 'saving'} disabled={!dirty && saveState !== 'error'} title="Save (Ctrl+S)">
-            <Save size={16} /> Save
-          </Button>
         </div>
-        {errors.title && <span className="field-error">{errors.title}</span>}
+        <span className="spacer" />
+        <div className="segmented view-toggle" role="radiogroup" aria-label="View">
+          <button type="button" role="radio" aria-checked={view === 'edit'} onClick={() => setView('edit')}>
+            Edit
+          </button>
+          <button type="button" role="radio" aria-checked={view === 'preview'} onClick={() => setView('preview')}>
+            Preview
+          </button>
+        </div>
+        <ExportMenu resumeId={id} title={resume.title} dirty={dirty} />
+        <Dropdown icon={MoreHorizontal} buttonProps={{ className: 'btn-icon', 'aria-label': 'More actions', title: 'More actions' }}>
+          <button type="button" role="menuitem" onClick={duplicate}>
+            <Copy size={15} /> Duplicate saved version
+          </button>
+          <Link role="menuitem" to={`/app/analyses?resume=${id}`}>
+            <Target size={15} /> Match to a job
+          </Link>
+          <Link role="menuitem" to={`/app/interviews?resume=${id}`}>
+            <MessageSquare size={15} /> Practise an interview
+          </Link>
+          <hr />
+          <button type="button" role="menuitem" className="danger" onClick={() => setConfirmDelete(true)}>
+            <Trash2 size={15} /> Delete resume
+          </button>
+        </Dropdown>
+        <Button variant="primary" onClick={save} loading={saveState === 'saving'} disabled={!dirty && saveState !== 'error'} title="Save (Ctrl+S)">
+          <Save size={15} /> Save
+          <span className="kbd save-kbd" aria-hidden="true">
+            Ctrl S
+          </span>
+        </Button>
       </div>
+      {errors.title && <span className="field-error">{errors.title}</span>}
 
       <div className="editor" data-view={view}>
-        <nav className="card section-nav" aria-label="Resume sections">
-          {SECTIONS.map((s) => (
-            <button key={s.id} type="button" aria-current={active === s.id ? 'true' : undefined} onClick={() => setActive(s.id)}>
-              {s.label}
-              <span className={`status-dot ${errorSections.has(s.id) ? 'error' : s.filled(resume) ? 'filled' : ''}`} aria-label={errorSections.has(s.id) ? 'has errors' : s.filled(resume) ? 'has content' : s.optional ? 'optional, empty' : 'empty'} />
-            </button>
-          ))}
+        <nav className="section-nav" aria-label="Resume sections">
+          <span className="section-title nav-heading">Sections</span>
+          {SECTIONS.map((s) => {
+            const Icon = SECTION_ICONS[s.id];
+            const state = errorSections.has(s.id) ? 'error' : s.filled(resume) ? 'filled' : '';
+            return (
+              <button key={s.id} type="button" aria-current={active === s.id ? 'true' : undefined} onClick={() => goTo(s.id)}>
+                <Icon size={15} aria-hidden="true" />
+                <span className="label">{s.label}</span>
+                <span className={`status-dot ${state}`} aria-label={state === 'error' ? 'has errors' : state === 'filled' ? 'has content' : s.optional ? 'optional, empty' : 'empty'} />
+              </button>
+            );
+          })}
           <div className="completeness">
-            {done.filled} of {done.total} core sections have content
+            <div className="row" style={{ justifyContent: 'space-between' }}>
+              <span>Core sections</span>
+              <b className="tabular">
+                {done.filled}/{done.total}
+              </b>
+            </div>
             <Meter value={done.percent} tone={done.percent === 100 ? 'success' : ''} label="Core sections with content" />
           </div>
         </nav>
 
-        <section className="card editor-form" aria-labelledby="section-title">
-          <div className="card-header">
-            <h2 id="section-title">{sectionMeta.label}</h2>
-            {sectionMeta.optional && <span className="small muted">Optional</span>}
+        <section className="card editor-form" aria-labelledby="section-title" ref={formTopRef}>
+          <div className="editor-form-head">
+            <span className="section-icon" aria-hidden="true">
+              <SectionIcon size={17} />
+            </span>
+            <div style={{ minWidth: 0 }}>
+              <div className="xsmall muted">
+                Section {index + 1} of {SECTIONS.length}
+                {sectionMeta.optional && ' · optional'}
+              </div>
+              <h2 id="section-title">{sectionMeta.label}</h2>
+              <p className="small muted">{sectionMeta.description}</p>
+            </div>
           </div>
           <div className="card-body">
             <Form resume={resume} setResume={setResume} errors={errors} />
           </div>
           <div className="card-footer" style={{ justifyContent: 'space-between' }}>
-            <div className="row">
-              {active === 'personal' && (
-                <div className="field" style={{ minWidth: 0 }}>
-                  <span className="field-label">Template</span>
-                  <div className="template-options" role="radiogroup" aria-label="Template">
-                    {TEMPLATES.map((t) => (
-                      <button key={t.id} type="button" role="radio" aria-checked={resume.template === t.id} className="template-option" onClick={() => setResume((r) => ({ ...r, template: t.id }))}>
-                        <b>{t.name}</b>
-                        <small>{t.description}</small>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-            <div className="row">
-              <Link className="btn btn-ghost btn-sm" to={`/app/analyses?resume=${id}`}>
-                <Target size={14} /> Match to a job
-              </Link>
-              <Link className="btn btn-ghost btn-sm" to={`/app/interviews?resume=${id}`}>
-                <MessageSquare size={14} /> Practise interview
-              </Link>
-            </div>
+            {prev ? (
+              <Button variant="ghost" onClick={() => goTo(prev.id)}>
+                <ArrowLeft size={15} /> {prev.label}
+              </Button>
+            ) : (
+              <span />
+            )}
+            {next && (
+              <Button onClick={() => goTo(next.id)}>
+                {next.label} <ArrowRight size={15} />
+              </Button>
+            )}
           </div>
         </section>
 
         <aside className="preview-pane" aria-label="Live preview">
-          <div className="row" style={{ marginBottom: 8, justifyContent: 'space-between' }}>
-            <span className="small muted">Live preview · {TEMPLATES.find((t) => t.id === resume.template)?.name}</span>
-            <span className="small muted">PDF export uses the same layout</span>
+          <div className="preview-head">
+            <div className="segmented" role="radiogroup" aria-label="Template">
+              {TEMPLATES.map((t) => (
+                <button key={t.id} type="button" role="radio" aria-checked={resume.template === t.id} title={t.description} onClick={() => setResume((r) => ({ ...r, template: t.id }))}>
+                  {t.name}
+                </button>
+              ))}
+            </div>
+            <span className="xsmall muted">Live · PDF uses this layout</span>
           </div>
           <div className="preview-scroller">
             <ResumePreview resume={resume} />
@@ -340,6 +430,10 @@ export function ResumeEditorPage() {
         onCancel={() => setConflict(false)}
       >
         <p>It was saved from another tab or device after you opened it. Loading the latest version discards your unsaved edits here. To keep both, copy your changes first.</p>
+      </ConfirmDialog>
+
+      <ConfirmDialog open={confirmDelete} title="Delete this resume?" confirmLabel="Delete resume" tone="danger" loading={deleting} onConfirm={remove} onCancel={() => setConfirmDelete(false)}>
+        <p>“{resume.title}” will be permanently deleted. Past job analyses keep a snapshot of its title. This cannot be undone.</p>
       </ConfirmDialog>
     </div>
   );

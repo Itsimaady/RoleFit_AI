@@ -71,15 +71,15 @@ export function toPayload(state, revision) {
 const hasText = (v) => Boolean(String(v || '').trim());
 
 export const SECTIONS = [
-  { id: 'personal', label: 'Personal info', filled: (s) => hasText(s.personal.fullName) && hasText(s.personal.email) },
-  { id: 'summary', label: 'Summary', filled: (s) => hasText(s.summary) },
-  { id: 'education', label: 'Education', filled: (s) => s.education.some((e) => hasText(e.institution)) },
-  { id: 'experience', label: 'Experience', filled: (s) => s.experience.some((e) => hasText(e.role) || hasText(e.organization)) },
-  { id: 'projects', label: 'Projects', filled: (s) => s.projects.some((p) => hasText(p.name)) },
-  { id: 'skills', label: 'Skills', filled: (s) => s.skills.technical.length > 0 },
-  { id: 'certifications', label: 'Certifications', filled: (s) => s.certifications.some((c) => hasText(c.name)), optional: true },
-  { id: 'achievements', label: 'Achievements', filled: (s) => s.achievements.some((a) => hasText(a.title)), optional: true },
-  { id: 'links', label: 'Links', filled: (s) => s.links.some((l) => hasText(l.url)), optional: true },
+  { id: 'personal', label: 'Personal info', description: 'Name, contact details and profile links.', filled: (s) => hasText(s.personal.fullName) && hasText(s.personal.email) },
+  { id: 'summary', label: 'Summary', description: 'Two or three sentences about your focus and the role you want.', filled: (s) => hasText(s.summary) },
+  { id: 'education', label: 'Education', description: 'Degrees, institutions and dates.', filled: (s) => s.education.some((e) => hasText(e.institution)) },
+  { id: 'experience', label: 'Experience', description: 'Internships, jobs, research and volunteer roles.', filled: (s) => s.experience.some((e) => hasText(e.role) || hasText(e.organization)) },
+  { id: 'projects', label: 'Projects', description: 'What you built, with which tools, and the result.', filled: (s) => s.projects.some((p) => hasText(p.name)) },
+  { id: 'skills', label: 'Skills', description: 'Skills you can discuss confidently in an interview.', filled: (s) => s.skills.technical.length > 0 },
+  { id: 'certifications', label: 'Certifications', description: 'Completed courses and credentials.', filled: (s) => s.certifications.some((c) => hasText(c.name)), optional: true },
+  { id: 'achievements', label: 'Achievements', description: 'Awards, competitions, scholarships and leadership.', filled: (s) => s.achievements.some((a) => hasText(a.title)), optional: true },
+  { id: 'links', label: 'Links', description: 'Portfolio, blog or other public profiles.', filled: (s) => s.links.some((l) => hasText(l.url)), optional: true },
 ];
 
 /** Share of core (non-optional) sections with content. Purely descriptive, not a quality score. */

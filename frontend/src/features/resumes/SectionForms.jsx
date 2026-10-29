@@ -106,7 +106,7 @@ function BulletEditor({ bullets, onChange, context, jobHint, label = 'Bullet poi
                 aria-invalid={errors[`${prefix}.bullets.${i}`] ? true : undefined}
                 onChange={(e) => set(i, e.target.value)}
               />
-              <div className="stack" style={{ gap: 4 }}>
+              <div className="bullet-actions">
                 <Button size="sm" variant="ghost" className="btn-icon" onClick={() => suggest(i)} loading={suggesting === i} aria-label={`Suggest a clearer version of bullet ${i + 1}`} title="Suggest clearer wording (AI)">
                   {suggesting !== i && <Sparkles size={15} />}
                 </Button>
@@ -116,14 +116,14 @@ function BulletEditor({ bullets, onChange, context, jobHint, label = 'Bullet poi
               </div>
             </div>
             {suggestions[i] && (
-              <div className="suggestion" role="status">
-                <span className="label">
-                  <Sparkles size={13} /> AI suggestion — check every fact before accepting
+              <div className="suggestion ai-surface" role="status">
+                <span className="ai-label">
+                  <Sparkles size={12} /> AI suggestion · check every fact before accepting
                 </span>
-                <span>{suggestions[i].suggestion}</span>
+                <span className="text">{suggestions[i].suggestion}</span>
                 {suggestions[i].notes && <span className="small muted">{suggestions[i].notes}</span>}
                 <div className="row">
-                  <Button size="sm" variant="primary" onClick={() => resolve(i, true)}>
+                  <Button size="sm" variant="ai" onClick={() => resolve(i, true)}>
                     <Check size={14} /> Use suggestion
                   </Button>
                   <Button size="sm" onClick={() => resolve(i, false)}>

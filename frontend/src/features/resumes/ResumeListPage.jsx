@@ -129,7 +129,7 @@ export function ResumeListPage() {
     <div className="page">
       <PageHeader
         title="Resumes"
-        description="Create tailored versions for different roles. Each one is private to your account."
+        description="Keep a tailored version for each kind of role you apply to. Every resume is private to your account."
         actions={
           <>
             <input ref={fileRef} type="file" accept={ACCEPT} hidden onChange={onImport} aria-label="Import a resume file" />
@@ -143,17 +143,19 @@ export function ResumeListPage() {
         }
       />
 
-      <div className="row">
-        <div className="field" style={{ flex: '1 1 260px', maxWidth: 380 }}>
+      <div className="list-toolbar">
+        <div className="search">
           <label htmlFor="resume-search" className="sr-only">
             Search resumes
           </label>
-          <div style={{ position: 'relative' }}>
-            <Search size={16} className="muted" style={{ position: 'absolute', left: 12, top: 12 }} aria-hidden="true" />
-            <input id="resume-search" className="input" style={{ paddingLeft: 36 }} placeholder="Search by title" value={query} onChange={(e) => setQuery(e.target.value)} />
-          </div>
+          <Search size={15} aria-hidden="true" />
+          <input id="resume-search" className="input" type="search" placeholder="Search by title" value={query} onChange={(e) => setQuery(e.target.value)} />
         </div>
-        {data && <span className="small muted">{data.total} resume{data.total === 1 ? '' : 's'}</span>}
+        {data && (
+          <span className="small muted">
+            {data.total} resume{data.total === 1 ? '' : 's'}
+          </span>
+        )}
       </div>
 
       {error ? (
@@ -186,8 +188,19 @@ export function ResumeListPage() {
         </div>
       ) : (
         <div className="resume-grid">
+          {!debounced && (
+            <button type="button" className="new-card" onClick={() => setCreating(true)}>
+              <span className="row-icon">
+                <Plus size={18} />
+              </span>
+              New resume
+              <span className="xsmall muted" style={{ fontWeight: 400 }}>
+                Blank guided template
+              </span>
+            </button>
+          )}
           {items.map((r) => (
-            <article className="card resume-card" key={r._id}>
+            <article className="card card-link resume-card" key={r._id}>
               <Link to={`/app/resumes/${r._id}`} className="resume-card-thumb" aria-label={`Edit ${r.title}`}>
                 <div className={`mini-paper ${r.template}`} aria-hidden="true">
                   <i />

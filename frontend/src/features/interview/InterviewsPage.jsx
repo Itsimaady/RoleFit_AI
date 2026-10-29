@@ -113,32 +113,42 @@ export function InterviewsPage() {
           )}
         </form>
 
-        <section className="card permission-card" aria-labelledby="privacy-title">
+        <section className="card" aria-labelledby="privacy-title">
           <div className="card-header">
             <h2 id="privacy-title">
-              <ShieldCheck size={17} /> What the interview uses
+              <ShieldCheck size={16} /> What the interview uses
             </h2>
           </div>
-          <div className="card-body stack">
-            <div>
-              <b className="row" style={{ gap: 8 }}>
-                <Mic size={16} /> Microphone (required)
-              </b>
-              <ul>
-                <li>Your voice is streamed to Google Gemini Live through our server so the AI interviewer can hear and reply.</li>
-                <li>We save the text transcript of each answer with its feedback. Audio is not recorded.</li>
-              </ul>
-            </div>
-            <div>
-              <b className="row" style={{ gap: 8 }}>
-                <Camera size={16} /> Camera (optional)
-              </b>
-              <ul>
-                <li>Video never leaves your browser. It is only used to estimate eye contact, posture and movement.</li>
-                <li>These signals are rough approximations. They do not measure personality, honesty or suitability for a job.</li>
-              </ul>
-            </div>
-            <p className="small muted">You can mute, turn the camera off, or end the interview at any time.</p>
+          <div className="card-body">
+            <ul className="privacy-list">
+              <li>
+                <span className="row-icon">
+                  <Mic size={15} />
+                </span>
+                <div>
+                  <b>Microphone · required</b>
+                  <p>Your voice is streamed to Google Gemini Live through our server so the interviewer can hear and reply. Audio is not recorded; the text transcript of each answer is saved with its feedback.</p>
+                </div>
+              </li>
+              <li>
+                <span className="row-icon">
+                  <Camera size={15} />
+                </span>
+                <div>
+                  <b>Camera · optional</b>
+                  <p>Video never leaves your browser. It is only used to estimate eye contact, posture and steadiness — rough signals that do not measure personality, honesty or suitability for a job.</p>
+                </div>
+              </li>
+              <li>
+                <span className="row-icon">
+                  <MessageSquare size={15} />
+                </span>
+                <div>
+                  <b>You stay in control</b>
+                  <p>Mute, turn the camera off, ask for a repeat, or end the interview at any time. Unfinished sessions can be resumed.</p>
+                </div>
+              </li>
+            </ul>
           </div>
         </section>
       </div>

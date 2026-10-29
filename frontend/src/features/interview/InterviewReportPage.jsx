@@ -5,7 +5,7 @@ import { api } from '../../lib/api.js';
 import { STATUS_LABEL, formatDateTime } from '../../lib/format.js';
 import { useApiData } from '../../hooks/useApiData.js';
 import { useToast } from '../../context/ToastContext.jsx';
-import { Alert, Badge, Button, ConfirmDialog, ErrorState, Meter, PageLoader } from '../../components/ui.jsx';
+import { Alert, Badge, Button, ConfirmDialog, ErrorState, Meter, PageLoader, Ring } from '../../components/ui.jsx';
 
 const COMPONENT_LABEL = {
   answer_technical_quality: 'Answer / technical quality',
@@ -53,8 +53,8 @@ export function InterviewReportPage() {
   return (
     <div className="page">
       <div className="row" style={{ justifyContent: 'space-between' }}>
-        <Link to="/app/interviews" className="small">
-          <ArrowLeft size={14} style={{ verticalAlign: '-2px' }} /> Mock interviews
+        <Link to="/app/interviews" className="back-link">
+          <ArrowLeft size={14} /> Mock interviews
         </Link>
         <div className="row">
           {(s.status === 'ready' || s.status === 'in_progress') && (
@@ -68,16 +68,13 @@ export function InterviewReportPage() {
         </div>
       </div>
 
-      <div className="card card-pad score-hero">
-        <div className="score-circle" aria-label={r?.overall_score != null ? `Overall ${r.overall_score} out of 100` : 'No overall score'}>
-          <div>
-            <strong>{r?.overall_score ?? '—'}</strong>
-            <span>/ 100</span>
-          </div>
-        </div>
+      <section className="card report-hero" aria-labelledby="report-title">
+        <Ring value={r?.overall_score} size={112} stroke={10} label="Overall score" sublabel="/ 100" tone="ai" />
         <div className="stack" style={{ gap: 6, flex: 1, minWidth: 240 }}>
           <div className="row">
-            <h1 style={{ fontSize: 22 }}>{s.targetRole}</h1>
+            <h1 id="report-title" style={{ fontSize: 22, letterSpacing: '-0.02em' }}>
+              {s.targetRole}
+            </h1>
             <Badge tone={s.status === 'completed' ? 'tone-success' : 'tone-warning'}>{STATUS_LABEL[s.status]}</Badge>
           </div>
           <p className="small muted">
@@ -87,7 +84,7 @@ export function InterviewReportPage() {
             Approximate, AI-assisted practice feedback. It is not a prediction of interview outcomes.
           </p>
         </div>
-      </div>
+      </section>
 
       {!r && <Alert tone="info" title="No report yet">This interview has not been completed. Continue it, or end it from the interview screen to generate a report from the answers recorded so far.</Alert>}
       {anyFallback && r && (
@@ -138,7 +135,7 @@ export function InterviewReportPage() {
             </div>
           </section>
 
-          <section className="card" aria-labelledby="summary">
+          <section className="card ai-surface" aria-labelledby="summary">
             <div className="card-header">
               <h2 id="summary">Feedback summary</h2>
               <Badge tone={r.ai_used ? 'tone-accent' : ''}>{r.ai_used ? 'AI-generated' : 'Rule-based'}</Badge>
@@ -197,7 +194,7 @@ export function InterviewReportPage() {
                 </span>
                 <div className="row">
                   {!a.aiUsed && <Badge>Estimated</Badge>}
-                  <b>{a.score}/100</b>
+                  <span className="qa-score">{a.score}/100</span>
                 </div>
               </div>
               <b>{a.question}</b>

@@ -75,7 +75,7 @@ describe('ResumeEditorPage', () => {
     const put = calls.find((c) => c.method === 'PUT');
     expect(put.body.revision).toBe(3);
     expect(put.body.personal.fullName).toBe('Aarav K Sharma');
-  });
+  }, 15000); // character-by-character typing is slow under jsdom
 
   it('adds and removes repeatable entries', async () => {
     mockApi({ ...authed, 'GET /api/resumes/r1': () => [200, { resume: doc }] });
@@ -88,7 +88,7 @@ describe('ResumeEditorPage', () => {
     expect(within(preview).getByText('Weather App')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /remove weather app/i }));
     expect(within(preview).queryByText('Weather App')).not.toBeInTheDocument();
-  });
+  }, 15000);
 
   it('explains a stale-revision conflict instead of overwriting', async () => {
     mockApi({

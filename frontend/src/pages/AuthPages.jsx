@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { CheckCircle2 } from 'lucide-react';
+import { FileText, MessageSquare, ShieldCheck, Target } from 'lucide-react';
 import { Brand } from '../components/Brand.jsx';
 import { Alert, Button, PasswordField, TextField } from '../components/ui.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
@@ -8,27 +8,48 @@ import { useToast } from '../context/ToastContext.jsx';
 import { fieldErrors } from '../lib/api.js';
 import { passwordStrength, validateLogin, validateRegistration } from '../lib/validation.js';
 
-function AuthLayout({ children }) {
+const POINTS = [
+  { icon: FileText, title: 'Resumes saved to your account', text: 'Edit, duplicate and export versions for every role.' },
+  { icon: Target, title: 'Evidence-based job matching', text: 'See which required skills your resume actually shows.' },
+  { icon: MessageSquare, title: 'Live mock interviews', text: 'Practise out loud with questions built from your resume.' },
+];
+
+function AuthLayout({ mode, children }) {
   return (
     <div className="auth">
-      <aside className="auth-aside">
+      <div className="auth-main">
         <Brand />
+        <div className="auth-center">
+          <div className="auth-card">
+            <nav className="segmented auth-tabs" aria-label="Account">
+              <Link to="/login" aria-current={mode === 'login' ? 'page' : undefined}>
+                Sign in
+              </Link>
+              <Link to="/register" aria-current={mode === 'register' ? 'page' : undefined}>
+                Create account
+              </Link>
+            </nav>
+            {children}
+          </div>
+        </div>
+        <p className="auth-legal">
+          <ShieldCheck size={12} style={{ verticalAlign: '-2px' }} /> Passwords are hashed with bcrypt. Sessions use secure HttpOnly cookies.
+        </p>
+      </div>
+      <aside className="auth-aside" aria-label="About RoleFit AI">
         <h2>Prepare for your first role with a clear, honest workflow.</h2>
-        <ul>
-          <li>
-            <CheckCircle2 size={18} /> Build and export professional resumes
-          </li>
-          <li>
-            <CheckCircle2 size={18} /> See exactly which job skills you already demonstrate
-          </li>
-          <li>
-            <CheckCircle2 size={18} /> Practise live interviews tailored to the role
-          </li>
+        <ul className="points">
+          {POINTS.map(({ icon: Icon, title, text }) => (
+            <li key={title}>
+              <Icon size={17} />
+              <div>
+                <b>{title}</b>
+                <span>{text}</span>
+              </div>
+            </li>
+          ))}
         </ul>
       </aside>
-      <main className="auth-main">
-        <div className="auth-card">{children}</div>
-      </main>
     </div>
   );
 }
@@ -71,10 +92,10 @@ export function LoginPage() {
   };
 
   return (
-    <AuthLayout>
+    <AuthLayout mode="login">
       <div>
         <h1>Welcome back</h1>
-        <p className="muted">Sign in to continue preparing.</p>
+        <p className="muted" style={{ marginTop: 6 }}>Sign in to continue where you left off.</p>
       </div>
       {sessionEndedReason && !serverError && <Alert tone="warning">{sessionEndedReason}</Alert>}
       {serverError && <Alert tone="danger">{serverError}</Alert>}
@@ -125,10 +146,10 @@ export function RegisterPage() {
   };
 
   return (
-    <AuthLayout>
+    <AuthLayout mode="register">
       <div>
         <h1>Create your account</h1>
-        <p className="muted">Free for students. It takes less than a minute.</p>
+        <p className="muted" style={{ marginTop: 6 }}>Free for students. It takes less than a minute.</p>
       </div>
       {serverError && (
         <Alert tone="danger">

@@ -24,6 +24,7 @@ export function useLiveInterview({ sessionId, onTurnComplete, onReady }) {
   const [muted, setMuted] = useState(false);
   const [cameraOn, setCameraOn] = useState(false);
   const [stream, setStream] = useState(null);
+  const [micLevel, setMicLevel] = useState(0); // 0..1, measured from the real input stream
 
   const wsRef = useRef(null);
   const ctxRef = useRef(null);
@@ -35,6 +36,7 @@ export function useLiveInterview({ sessionId, onTurnComplete, onReady }) {
   const mutedRef = useRef(false);
   const endedRef = useRef(false);
   const readyRef = useRef(false);
+  const levelRafRef = useRef(0);
   const callbacks = useRef({ onTurnComplete, onReady });
   callbacks.current = { onTurnComplete, onReady };
 
@@ -173,7 +175,24 @@ export function useLiveInterview({ sessionId, onTurnComplete, onReady }) {
       source.connect(node);
       node.connect(sink);
       sink.connect(ctx.destination);
-      nodesRef.current = [source, node, sink];
+
+      // Input level meter: shows whether the microphone is actually picking up sound.
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 512;
+      source.connect(analyser);
+      const samples = new Float32Array(analyser.fftSize);
+      let lastPaint = 0;
+      const tick = (t) => {
+        levelRafRef.current = requestAnimationFrame(tick);
+        if (t - lastPaint < 100) return;
+        lastPaint = t;
+        analyser.getFloatTimeDomainData(samples);
+        let sum = 0;
+        for (let i = 0; i < samples.length; i++) sum += samples[i] * samples[i];
+        setMicLevel(mutedRef.current ? 0 : Math.min(1, Math.sqrt(sum / samples.length) * 6));
+      };
+      levelRafRef.current = requestAnimationFrame(tick);
+      nodesRef.current = [source, node, sink, analyser];
 
       connect();
       return { cameraFailed };
@@ -183,6 +202,8 @@ export function useLiveInterview({ sessionId, onTurnComplete, onReady }) {
 
   const stop = useCallback(() => {
     endedRef.current = true;
+    cancelAnimationFrame(levelRafRef.current);
+    setMicLevel(0);
     closeSocket();
     playerRef.current?.stop();
     nodesRef.current.forEach((n) => {
@@ -246,6 +267,7 @@ export function useLiveInterview({ sessionId, onTurnComplete, onReady }) {
     error,
     muted,
     cameraOn,
+    micLevel,
     hasCamera: Boolean(stream?.getVideoTracks().length),
     stream,
     start,

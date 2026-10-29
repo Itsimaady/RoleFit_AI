@@ -11,8 +11,8 @@ export function AnalysisDetailPage() {
   return (
     <div className="page">
       <div className="row" style={{ justifyContent: 'space-between' }}>
-        <Link to="/app/analyses" className="small">
-          <ArrowLeft size={14} style={{ verticalAlign: '-2px' }} /> All analyses
+        <Link to="/app/analyses" className="back-link">
+          <ArrowLeft size={14} /> All job matches
         </Link>
         {data?.analysis?.resume && (
           <Link className="btn btn-primary btn-sm" to={`/app/interviews?resume=${data.analysis.resume}&analysis=${id}`}>

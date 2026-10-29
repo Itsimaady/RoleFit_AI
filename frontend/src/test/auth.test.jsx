@@ -58,9 +58,11 @@ describe('RegisterPage', () => {
     const reg = calls.find((c) => c.path === '/api/auth/register');
     expect(reg.headers['X-CSRF-Token']).toBe('test-csrf');
     expect(reg.body.email).toBe('test@example.com');
-    // New account: getting-started checklist driven by real (zero) counts.
-    expect(await screen.findByText('Getting started')).toBeInTheDocument();
-    expect(screen.getByText('0 of 3 done')).toBeInTheDocument();
+    // New account: first-step guidance driven by real (zero) counts, no fake totals.
+    expect(await screen.findByText('Your first step')).toBeInTheDocument();
+    for (const link of screen.getAllByRole('link', { name: /^create resume/i })) expect(link).toHaveAttribute('href', '/app/resumes?new=1');
+    expect(screen.getByText('Next step')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Your totals')).not.toBeInTheDocument();
   });
 
   it('shows the server message for a duplicate email', async () => {
