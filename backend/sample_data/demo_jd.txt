@@ -1,0 +1,11 @@
+Backend Software Engineer
+We are looking for a Backend Software Engineer to build scalable services and APIs.
+Requirements:
+- Strong Python programming and FastAPI experience
+- REST API and SQL/PostgreSQL experience
+- AWS cloud experience
+- Docker and Kubernetes
+- CI/CD pipelines and Git
+- Experience building scalable backend services
+- Strong problem solving and communication
+Preferred: microservices, observability, automated testing.

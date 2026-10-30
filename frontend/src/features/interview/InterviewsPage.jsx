@@ -1,0 +1,237 @@
+import { useEffect, useState } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Camera, FileText, Mic, MessageSquare, ShieldCheck, Trash2 } from 'lucide-react';
+import { api, fieldErrors } from '../../lib/api.js';
+import { STATUS_LABEL, STATUS_TONE, formatDate } from '../../lib/format.js';
+import { useApiData } from '../../hooks/useApiData.js';
+import { useToast } from '../../context/ToastContext.jsx';
+import { Alert, Badge, Button, ConfirmDialog, EmptyState, ErrorState, PageHeader, SkeletonList } from '../../components/ui.jsx';
+import { JobForm, validateJobForm } from '../analysis/AnalysisPage.jsx';
+import { GuidedSetup } from './GuidedSetup.jsx';
+import { interviewPath, scoreLabel } from './guidedModel.js';
+
+export function InterviewsPage() {
+  const [params] = useSearchParams();
+  const navigate = useNavigate();
+  const toast = useToast();
+  const availability = useApiData('/api/interviews/availability');
+  const resumes = useApiData('/api/resumes?limit=50');
+  const history = useApiData('/api/interviews?limit=20');
+  const analysisId = params.get('analysis');
+  const linkedAnalysis = useApiData(analysisId ? `/api/analyses/${analysisId}` : null);
+  const [values, setValues] = useState({ resumeId: params.get('resume') || '', targetRole: '', jobDescription: '' });
+  const [errors, setErrors] = useState({});
+  const [creating, setCreating] = useState(false);
+  const [toDelete, setToDelete] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+  const [mode, setMode] = useState('guided');
+
+  // Prefill from a job analysis ("Practise an interview for this job").
+  useEffect(() => {
+    const a = linkedAnalysis.data?.analysis;
+    if (a) setValues((v) => ({ ...v, resumeId: a.resume || v.resumeId, targetRole: a.targetRole || v.targetRole, jobDescription: a.jobDescription }));
+  }, [linkedAnalysis.data]);
+
+  const ready = availability.data?.ready;
+
+  const create = async (e) => {
+    e.preventDefault();
+    const clientErrors = validateJobForm(values, { roleRequired: true });
+    setErrors(clientErrors);
+    if (Object.keys(clientErrors).length) return;
+    setCreating(true);
+    try {
+      const { session } = await api.post('/api/interviews', { resumeId: values.resumeId, targetRole: values.targetRole.trim(), jobDescription: values.jobDescription.trim() });
+      navigate(`/app/interviews/${session._id}/live`);
+    } catch (err) {
+      setErrors(fieldErrors(err));
+      toast.error(err.message);
+      if (err.status === 503) availability.reload();
+      setCreating(false);
+    }
+  };
+
+  const remove = async () => {
+    setDeleting(true);
+    try {
+      await api.del(`/api/interviews/${toDelete._id}`);
+      history.setData((d) => ({ ...d, items: d.items.filter((i) => i._id !== toDelete._id), total: d.total - 1 }));
+      toast.success('Interview deleted.');
+      setToDelete(null);
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const resumeItems = resumes.data?.items || [];
+
+  return (
+    <div className="page">
+      <PageHeader
+        title="Mock interviews"
+        description="Practise out loud with questions tailored to your target role, then review feedback and learn what you skipped."
+        actions={
+          <div className="segmented" role="tablist" aria-label="Interview mode">
+            <button type="button" role="tab" aria-selected={mode === 'guided'} onClick={() => setMode('guided')}>
+              Guided voice interview
+            </button>
+            <button type="button" role="tab" aria-selected={mode === 'live'} onClick={() => setMode('live')}>
+              Live conversation
+            </button>
+          </div>
+        }
+      />
+
+      {availability.data && !ready && (
+        <Alert
+          tone="warning"
+          title="AI interviews are not available right now"
+          action={
+            <Button size="sm" onClick={availability.reload}>
+              Check again
+            </Button>
+          }
+        >
+          {availability.data.message} Your resumes, job analyses and past interview reports still work.
+        </Alert>
+      )}
+      {availability.error && <Alert tone="warning" title="Could not check interview availability">{availability.error.message}</Alert>}
+
+      {mode === 'guided' && (
+        <GuidedSetup
+          resumes={resumeItems}
+          availability={availability.data}
+          initial={{ resumeId: values.resumeId, jobDescription: values.jobDescription, targetRole: values.targetRole }}
+        />
+      )}
+
+      {mode === 'live' && (
+      <div className="grid-2" style={{ alignItems: 'start' }}>
+        <p className="small muted" style={{ gridColumn: '1 / -1' }}>
+          Live conversation uses Gemini Live speech-to-speech: the AI hears you directly and moves on when you pause. It always asks 12 questions and needs a resume and job description.
+        </p>
+        <form className="card" onSubmit={create} noValidate aria-labelledby="setup-title" style={{ gridColumn: 'span 1' }}>
+          <div className="card-header">
+            <h2 id="setup-title">
+              <MessageSquare size={17} /> Set up an interview
+            </h2>
+          </div>
+          <div className="card-body">
+            {resumes.loading && !resumes.data ? (
+              <SkeletonList rows={2} />
+            ) : resumes.error ? (
+              <ErrorState error={resumes.error} onRetry={resumes.reload} />
+            ) : resumeItems.length === 0 ? (
+              <EmptyState icon={FileText} title="You need a resume first" action={<Link className="btn btn-primary" to="/app/resumes?new=1">Create a resume</Link>}>
+                Questions are personalised from your saved resume.
+              </EmptyState>
+            ) : (
+              <JobForm resumes={resumeItems} values={values} setValues={setValues} errors={errors} disabled={creating} roleRequired />
+            )}
+          </div>
+          {resumeItems.length > 0 && (
+            <div className="card-footer">
+              {!ready && <span className="small muted" style={{ marginRight: 'auto' }}>Unavailable until the AI service and Gemini are configured.</span>}
+              <Button type="submit" variant="primary" loading={creating} disabled={!ready}>
+                {creating ? 'Preparing questions…' : 'Prepare interview'}
+              </Button>
+            </div>
+          )}
+        </form>
+
+        <section className="card" aria-labelledby="privacy-title">
+          <div className="card-header">
+            <h2 id="privacy-title">
+              <ShieldCheck size={16} /> What the interview uses
+            </h2>
+          </div>
+          <div className="card-body">
+            <ul className="privacy-list">
+              <li>
+                <span className="row-icon">
+                  <Mic size={15} />
+                </span>
+                <div>
+                  <b>Microphone · required</b>
+                  <p>Your voice is streamed to Google Gemini Live through our server so the interviewer can hear and reply. Audio is not recorded; the text transcript of each answer is saved with its feedback.</p>
+                </div>
+              </li>
+              <li>
+                <span className="row-icon">
+                  <Camera size={15} />
+                </span>
+                <div>
+                  <b>Camera · optional</b>
+                  <p>Video never leaves your browser. It is only used to estimate eye contact, posture and steadiness — rough signals that do not measure personality, honesty or suitability for a job.</p>
+                </div>
+              </li>
+              <li>
+                <span className="row-icon">
+                  <MessageSquare size={15} />
+                </span>
+                <div>
+                  <b>You stay in control</b>
+                  <p>Mute, turn the camera off, ask for a repeat, or end the interview at any time. Unfinished sessions can be resumed.</p>
+                </div>
+              </li>
+            </ul>
+          </div>
+        </section>
+      </div>
+      )}
+
+      <section className="card" aria-labelledby="interview-history">
+        <div className="card-header">
+          <h2 id="interview-history">Your sessions</h2>
+          {history.data && <span className="small muted">{history.data.total} total</span>}
+        </div>
+        {history.error ? (
+          <ErrorState error={history.error} onRetry={history.reload} />
+        ) : history.loading && !history.data ? (
+          <SkeletonList />
+        ) : history.data?.items.length ? (
+          <ul className="list">
+            {history.data.items.map((s) => {
+              const resumable = s.status === 'ready' || s.status === 'in_progress';
+              const title = s.targetRole || s.config?.category || 'Mock interview';
+              const total = s.mode === 'guided' ? s.config?.questionCount : 12;
+              const score = scoreLabel(s);
+              return (
+                <li className="list-row interactive" key={s._id}>
+                  <div className="grow">
+                    <Link className="title" to={interviewPath(s)}>
+                      {title}
+                    </Link>
+                    <span className="meta">
+                      {s.mode === 'guided' ? `Guided · ${s.config?.category} · ${s.config?.difficulty}` : 'Live conversation'} · {formatDate(s.createdAt)} · {s.answeredCount}/{total} done
+                      {s.questionSource === 'fallback' && ' · template questions'}
+                    </span>
+                  </div>
+                  {score ? <Badge tone="tone-success">{score}</Badge> : <Badge tone={STATUS_TONE[s.status]}>{STATUS_LABEL[s.status]}</Badge>}
+                  {resumable && (
+                    <Link className="btn btn-sm" to={interviewPath(s)}>
+                      {s.status === 'ready' ? 'Start' : 'Continue'}
+                    </Link>
+                  )}
+                  <Button size="sm" variant="ghost" className="btn-icon" onClick={() => setToDelete(s)} aria-label={`Delete interview for ${title}`}>
+                    <Trash2 size={15} />
+                  </Button>
+                </li>
+              );
+            })}
+          </ul>
+        ) : (
+          <EmptyState icon={MessageSquare} title="No interview sessions yet">
+            Completed interviews and their feedback reports will be listed here.
+          </EmptyState>
+        )}
+      </section>
+
+      <ConfirmDialog open={Boolean(toDelete)} title="Delete this interview?" confirmLabel="Delete" tone="danger" loading={deleting} onConfirm={remove} onCancel={() => setToDelete(null)}>
+        <p>The transcript and feedback for “{toDelete?.targetRole || toDelete?.config?.category}” will be permanently deleted.</p>
+      </ConfirmDialog>
+    </div>
+  );
+}

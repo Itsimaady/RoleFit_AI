@@ -1,0 +1,7 @@
+# OPTIONAL: local semantic similarity for /api/analyze (lazy-loaded).
+# Without these the service uses its deterministic keyword fallback.
+# Python 3.12 is recommended for these pins.
+-r requirements.txt
+numpy==2.2.2
+scikit-learn==1.6.1
+sentence-transformers==3.4.1

@@ -1,0 +1,15 @@
+{
+  "name": "rolefit-ai",
+  "private": true,
+  "description": "RoleFit AI — MERN career preparation platform with an optional Python Gemini AI service",
+  "scripts": {
+    "install:all": "npm --prefix server install && npm --prefix frontend install",
+    "dev:server": "npm --prefix server run dev",
+    "dev:server:localdb": "npm --prefix server run dev:localdb",
+    "dev:client": "npm --prefix frontend run dev",
+    "test": "npm --prefix server test && npm --prefix frontend test",
+    "lint": "npm --prefix server run lint && npm --prefix frontend run lint",
+    "build": "npm --prefix frontend run build",
+    "start": "npm --prefix server start"
+  }
+}
