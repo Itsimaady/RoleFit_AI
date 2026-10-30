@@ -33,7 +33,7 @@ async function requireGemini() {
   if (!ai.geminiConfigured) throw ApiError.unavailable('Gemini is not configured on the AI service, so questions cannot be generated or evaluated.', 'ai_not_configured');
 }
 
-async function createSession({ owner, resume, resumeText, config, questions, practiceOf, practiceKind }) {
+async function createSession({ owner, resume, resumeText, config, questions, questionSource = 'gemini', practiceOf, practiceKind }) {
   return InterviewSession.create({
     owner,
     mode: 'guided',
@@ -53,7 +53,7 @@ async function createSession({ owner, resume, resumeText, config, questions, pra
       visualCoaching: config.visualCoaching,
     },
     questions,
-    questionSource: 'gemini',
+    questionSource,
     practiceOf,
     practiceKind,
   });
@@ -94,7 +94,9 @@ export async function createGuidedInterview(req, res) {
   // The configured count is a contract with the user.
   if (questions.length !== body.questionCount) throw new ApiError(502, 'ai_service_error', 'The AI did not return the requested number of questions. Please try again.');
 
-  const session = await createSession({ owner: req.user.id, resume, resumeText, config: body, questions });
+  // 'fallback' = template questions served because Gemini was temporarily unavailable.
+  const questionSource = data.source === 'fallback' ? 'fallback' : 'gemini';
+  const session = await createSession({ owner: req.user.id, resume, resumeText, config: body, questions, questionSource });
   res.status(201).json({ session: strip(session) });
 }
 
@@ -277,6 +279,7 @@ export async function startPractice(req, res) {
       visualCoaching: source.config.visualCoaching,
     },
     questions,
+    questionSource: source.questionSource === 'fallback' ? 'fallback' : 'gemini',
     practiceOf: source._id,
     practiceKind: kind,
   });

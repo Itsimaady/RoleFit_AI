@@ -91,6 +91,26 @@ describe('guided interview configuration', () => {
     });
   });
 
+  it('records Gemini as the question source normally', async () => {
+    await withAi({}, async () => {
+      const s = await guided(await registeredClient(app));
+      assert.equal(s.questionSource, 'gemini');
+    });
+  });
+
+  it('starts with template fallback questions when Gemini is busy and labels the session', async () => {
+    await withAi({ questionSource: 'fallback' }, async () => {
+      const c = await registeredClient(app);
+      const s = await guided(c, { questionCount: 10 });
+      assert.equal(s.questionSource, 'fallback', 'never recorded as Gemini output');
+      assert.equal(s.questions.length, 10);
+      assert.equal((await InterviewSession.findById(s._id)).questionSource, 'fallback');
+      const fetched = await c.get(`/api/interviews/${s._id}`);
+      assert.equal(fetched.status, 200);
+      assert.equal(fetched.body.session.questionSource, 'fallback');
+    });
+  });
+
   it('refuses to start without Gemini instead of inventing questions', async () => {
     await withAi({ geminiConfigured: false }, async () => {
       const c = await registeredClient(app);

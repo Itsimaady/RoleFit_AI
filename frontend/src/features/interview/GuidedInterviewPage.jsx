@@ -404,6 +404,11 @@ export function GuidedInterviewPage() {
           <p className="small muted">
             {session.config.category} · {session.config.difficulty} · {total} question{total === 1 ? "" : "s"}{session.practiceKind ? ` · practice (${session.practiceKind === 'skipped' ? 'skipped questions' : 'weak answers'})` : ''}
           </p>
+          {session.questionSource === 'fallback' && (
+            <p className="small muted" data-testid="fallback-questions-note">
+              Template questions: Gemini was temporarily unavailable, so these were not AI-generated. Answer evaluation still uses Gemini.
+            </p>
+          )}
         </div>
         <div className="row">
           <span className="pill light tabular" title="Total time">

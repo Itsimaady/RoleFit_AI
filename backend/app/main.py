@@ -8,15 +8,18 @@ The public API routes are kept compatible with the existing RoleFit-AI frontend.
 from __future__ import annotations
 
 import hmac
+import http.client
 import io
 import json
 import logging
 import os
+import random
 import re
+import ssl
 import threading
-import urllib.error
-import urllib.request
+import time
 import asyncio
+from email.utils import parsedate_to_datetime
 from urllib.parse import quote
 
 import websockets
@@ -44,7 +47,6 @@ GEMINI_LIVE_MODEL = os.getenv("GEMINI_LIVE_MODEL", "gemini-3.8-live")
 GEMINI_VOICE = os.getenv("GEMINI_VOICE", "Aoede")
 MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_MB", "10")) * 1024 * 1024
 MAX_TEXT_CHARS = int(os.getenv("MAX_TEXT_CHARS", "50000"))
-AI_TIMEOUT = int(os.getenv("AI_TIMEOUT_SECONDS", "45"))
 
 DEFAULT_CORS = [
     "http://localhost:5173",
@@ -972,32 +974,184 @@ def extract_json_object(raw: str) -> Optional[Any]:
     return None
 
 
+DEFAULT_GEMINI_TEXT_MODEL = "gemini-3.8-flash"
+
+
+def gemini_text_model() -> str:
+    """Text-generation model id as used in the REST path (models/{id}:generateContent).
+
+    Accepts either "gemini-3.8-flash" or "models/gemini-3.8-flash" in the env so a
+    prefixed value cannot produce a broken "models/models/..." URL.
+    """
+    model = os.getenv("GEMINI_TEXT_MODEL", "").strip() or DEFAULT_GEMINI_TEXT_MODEL
+    return model.removeprefix("models/")
+
+
+def gemini_text_models() -> List[str]:
+    """Primary text model followed by GEMINI_TEXT_FALLBACK_MODELS (comma-separated), de-duplicated.
+
+    Fallback models are only used when the previous model fails transiently
+    (overload, rate limit, timeout, network); configuration errors still surface.
+    """
+    models = [gemini_text_model()]
+    for raw in os.getenv("GEMINI_TEXT_FALLBACK_MODELS", "").split(","):
+        model = raw.strip().removeprefix("models/")
+        if model and model not in models:
+            models.append(model)
+    return models
+
+
+def _env_float(name: str, default: float, low: float, high: float) -> float:
+    try:
+        return max(low, min(high, float(os.getenv(name, "") or default)))
+    except ValueError:
+        return default
+
+
+GEMINI_HOST = "generativelanguage.googleapis.com"
+# Connect and read timeouts are separate; the total budget bounds every retry and
+# must stay below Express's AI_SERVICE_TIMEOUT_MS (60 s by default).
+GEMINI_CONNECT_TIMEOUT = _env_float("GEMINI_CONNECT_TIMEOUT_SECONDS", 5, 1, 30)
+GEMINI_READ_TIMEOUT = _env_float("GEMINI_READ_TIMEOUT_SECONDS", 25, 5, 120)
+GEMINI_TOTAL_TIMEOUT = _env_float("GEMINI_TOTAL_TIMEOUT_SECONDS", 50, 5, 300)
+GEMINI_MAX_ATTEMPTS = int(_env_float("GEMINI_MAX_ATTEMPTS", 3, 1, 5))
+GEMINI_BACKOFF_BASE = 1.0
+GEMINI_BACKOFF_CAP = 8.0
+# Overload / rate limit / transient server errors. 400/401/403/404 are never retried.
+GEMINI_RETRYABLE_STATUS = {429, 500, 502, 503, 504}
+
+# Indirection points so tests can control time, randomness and the network.
+_sleep = time.sleep
+_monotonic = time.monotonic
+_random = random.random
+
+
+def _gemini_post(path: str, body: bytes, key: str, connect_timeout: float, read_timeout: float, deadline: Optional[float] = None) -> Tuple[int, Dict[str, str], bytes]:
+    """One HTTPS POST with separate connect and read timeouts.
+
+    The read timeout is set after connecting, from the time actually left before
+    the deadline, so connect + read cannot overrun the total budget. The key is
+    sent in the x-goog-api-key header, never in the URL, so it cannot leak
+    through URLs in logs or exception messages.
+    """
+    conn = http.client.HTTPSConnection(GEMINI_HOST, timeout=connect_timeout, context=ssl.create_default_context())
+    try:
+        conn.connect()
+        if deadline is not None:
+            read_timeout = min(read_timeout, max(0.5, deadline - _monotonic()))
+        conn.sock.settimeout(read_timeout)
+        conn.request("POST", path, body=body, headers={"Content-Type": "application/json", "x-goog-api-key": key})
+        resp = conn.getresponse()
+        return resp.status, {k.lower(): v for k, v in resp.getheaders()}, resp.read()
+    finally:
+        conn.close()
+
+
+def _retry_after_seconds(value: Optional[str]) -> Optional[float]:
+    """Retry-After as delta-seconds or an HTTP date; None when absent or invalid."""
+    if not value:
+        return None
+    value = value.strip()
+    try:
+        return max(0.0, float(value))
+    except ValueError:
+        pass
+    try:
+        from datetime import datetime, timezone
+
+        when = parsedate_to_datetime(value)
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=timezone.utc)
+        return max(0.0, (when - datetime.now(timezone.utc)).total_seconds())
+    except (TypeError, ValueError):
+        return None
+
+
+def _backoff_delay(attempt: int) -> float:
+    """Exponential backoff with jitter: attempt 1 -> 0.5-1 s, 2 -> 1-2 s, 3 -> 2-4 s (capped)."""
+    ceiling = min(GEMINI_BACKOFF_CAP, GEMINI_BACKOFF_BASE * (2 ** (attempt - 1)))
+    return ceiling / 2 + _random() * ceiling / 2
+
+
 def call_gemini_text(prompt: str) -> Tuple[Optional[str], Optional[str]]:
-    """Call Gemini text generation for question/evaluation tasks."""
+    """Call Gemini text generation for question/evaluation tasks.
+
+    Transient failures (HTTP 429/5xx, timeouts, network errors) first move to the
+    next model in GEMINI_TEXT_FALLBACK_MODELS (no wait), and once every model has
+    been tried are retried with exponential backoff + jitter, honouring
+    Retry-After — all within a total time budget.
+    Returns (text, None) on success or (None, error) — the error never contains the key.
+    """
     key = os.getenv("GEMINI_API_KEY", "").strip()
     if not key:
         return None, "GEMINI_API_KEY is not configured"
-    import urllib.request
-    import urllib.error
-    import json as _json
-    model = os.getenv("GEMINI_TEXT_MODEL", "gemini-2.5-flash")
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={quote(key)}"
-    payload = {
+    models = gemini_text_models()
+    body = json.dumps({
         "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.2, "responseMimeType": "application/json"}
-    }
-    req = urllib.request.Request(url, data=_json.dumps(payload).encode("utf-8"), headers={"Content-Type":"application/json"}, method="POST")
-    try:
-        with urllib.request.urlopen(req, timeout=AI_TIMEOUT) as resp:
-            data = _json.loads(resp.read().decode("utf-8"))
-        parts = (((data.get("candidates") or [{}])[0].get("content") or {}).get("parts") or [])
-        text = "".join(p.get("text", "") for p in parts if isinstance(p, dict)).strip()
-        return text or None, None if text else "Gemini returned no text"
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="ignore")[:1000]
-        return None, f"Gemini HTTP {exc.code}: {detail}"
-    except Exception as exc:
-        return None, f"Gemini request failed: {exc}"
+        "generationConfig": {"temperature": 0.2, "responseMimeType": "application/json"},
+    }).encode("utf-8")
+
+    deadline = _monotonic() + GEMINI_TOTAL_TIMEOUT
+    max_attempts = max(GEMINI_MAX_ATTEMPTS, len(models))
+    last_error = "Gemini request was not attempted"
+    attempt = 0
+    index = 0  # position in the model chain
+    while attempt < max_attempts:
+        attempt += 1
+        remaining = deadline - _monotonic()
+        if remaining < 1:
+            break
+        model = models[index]
+        path = f"/v1beta/models/{quote(model, safe='.-_')}:generateContent"
+        retry_after = None
+        try:
+            status, headers, raw = _gemini_post(path, body, key, min(GEMINI_CONNECT_TIMEOUT, remaining), min(GEMINI_READ_TIMEOUT, remaining), deadline)
+        except TimeoutError:  # socket.timeout is an alias of TimeoutError
+            last_error = "Gemini request timed out"
+        except (OSError, http.client.HTTPException) as exc:
+            last_error = f"Gemini network error ({type(exc).__name__})"
+        else:
+            if 200 <= status < 300:
+                try:
+                    data = json.loads(raw.decode("utf-8"))
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    return None, "Gemini returned an unreadable response"
+                parts = (((data.get("candidates") or [{}])[0].get("content") or {}).get("parts") or [])
+                text = "".join(p.get("text", "") for p in parts if isinstance(p, dict)).strip()
+                if text and index > 0:
+                    logger.warning("Gemini text served by fallback model %s (primary %s unavailable)", model, models[0])
+                return text or None, None if text else "Gemini returned no text"
+            detail = _redact(raw.decode("utf-8", errors="ignore"))[:1000]
+            last_error = f"Gemini HTTP {status}: {detail}"
+            if status not in GEMINI_RETRYABLE_STATUS:
+                return None, last_error
+            retry_after = _retry_after_seconds(headers.get("retry-after"))
+
+        if attempt >= max_attempts:
+            break
+        if index + 1 < len(models):
+            # A different model is not affected by this model's overload: switch now.
+            logger.warning("Gemini transient failure on %s (attempt %d/%d): %s; switching to fallback model %s", model, attempt, max_attempts, last_error[:160], models[index + 1])
+            index += 1
+            continue
+        index = 0  # every model tried once: back off, then start the chain again
+        delay = _backoff_delay(attempt)
+        if retry_after is not None:
+            delay = max(delay, retry_after)
+        if delay > deadline - _monotonic() - 1:
+            logger.warning("Gemini transient failure on %s (attempt %d/%d): %s; not retrying, %.1fs wait exceeds the time budget", model, attempt, max_attempts, last_error[:160], delay)
+            break
+        logger.warning("Gemini transient failure on %s (attempt %d/%d): %s; retrying in %.1fs", model, attempt, max_attempts, last_error[:160], delay)
+        _sleep(delay)
+    tried = f"; models tried: {', '.join(models)}" if len(models) > 1 else ""
+    return None, f"{last_error} (after {attempt} attempt{'s' if attempt != 1 else ''}{tried})"
+
+
+def is_transient_gemini_error(error: Optional[str]) -> bool:
+    """True for overload, rate-limit, timeout and network errors from call_gemini_text."""
+    if not error:
+        return False
+    return bool(re.search(r"Gemini HTTP (429|500|502|503|504)\b|timed out|network error", error))
 
 
 def fallback_questions(resume: str, job_description: str) -> List[Dict[str, str]]:
@@ -1272,5 +1426,7 @@ guided_interview.configure(
     gemini=lambda prompt: call_gemini_text(prompt),
     extract=lambda raw: extract_json_object(raw),
     configured=lambda: gemini_configured(),
+    transient=lambda error: is_transient_gemini_error(error),
+    skills=lambda text: skills(text),
 )
 app.include_router(guided_interview.router)

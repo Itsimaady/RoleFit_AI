@@ -102,7 +102,8 @@ export async function startFakeAiService({ geminiConfigured = true, ...options }
       // ---- guided interview stand-ins
       const b = calls.at(-1).body || {};
       if (req.url === '/api/interview/guided/questions') {
-        return json(200, { questions: Array.from({ length: b.count }, (_, i) => ({ question: `${b.category} question ${i + 1}?`, category: b.category, topic: 't', difficulty: b.difficulty })) });
+        const questions = Array.from({ length: b.count }, (_, i) => ({ question: `${b.category} question ${i + 1}?`, category: b.category, topic: 't', difficulty: b.difficulty }));
+        return json(200, { questions, source: options.questionSource || 'gemini' });
       }
       if (req.url === '/api/interview/guided/evaluate') {
         if (options.failEvaluate) return json(502, { detail: 'The AI could not produce a valid answer evaluation. Please try again.' });
