@@ -13,6 +13,22 @@ RoleFit AI helps you prepare. It does **not** guarantee interviews, ATS selectio
 
 ---
 
+## Screenshots
+
+All names and details below are sample data.
+
+![RoleFit AI landing page](docs/screenshots/landing.png)
+
+| Dashboard | Resume builder |
+|---|---|
+| ![Dashboard with saved resumes, job matches and recent activity](docs/screenshots/dashboard.png) | ![Resume editor with section forms and a live preview](docs/screenshots/resume-editor.png) |
+
+| Job match | Mock interview setup |
+|---|---|
+| ![Job match showing skill coverage, matched skills and skills not found](docs/screenshots/analysis-result.png) | ![Mock interview settings for difficulty, length and category](docs/screenshots/interviews.png) |
+
+---
+
 ## Architecture
 
 ```
